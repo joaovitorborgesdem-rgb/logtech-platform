@@ -24,13 +24,26 @@ enum UserStatus {
   DISABLED
 }
 
+enum AuditAction {
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  LOGOUT
+  REGISTER
+  OAUTH_LOGIN
+  USER_CREATED
+  USER_UPDATED
+  USER_DELETED
+  USER_ROLE_CHANGED
+}
+
 model Tenant {
   id     String       @id @default(cuid())
   name   String
   slug   String       @unique
   status TenantStatus @default(ACTIVE)
 
-  users User[]
+  users     User[]
+  auditLogs AuditLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -46,9 +59,44 @@ model User {
   role         UserRole   @default(MEMBER)
   status       UserStatus @default(INVITED)
 
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([tenantId, email])
   @@index([tenantId])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id       String  @id @default(cuid())
+  tenantId String?
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  userId   String?
+  user     User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action      AuditAction
+  description String?
+  metadata    Json?
+  ipAddress   String?
+  userAgent   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([action])
+  @@index([tenantId, createdAt])
 }

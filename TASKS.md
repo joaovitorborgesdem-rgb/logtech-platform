@@ -21,7 +21,7 @@ Legenda: `[x]` feito · `[ ]` pendente
 - [ ] Hash de senha (bcrypt/argon2) e políticas de força
 
 ## 2. Multi-tenancy
-- [ ] Modelagem `Tenant`/`Organization` no Prisma
+- [x] Modelagem `Tenant`/`Organization` no Prisma
 - [ ] Estratégia de isolamento (schema-per-tenant vs. tenant_id em linha) — decidir e documentar
 - [ ] Middleware/interceptor de resolução de tenant (subdomínio, header ou token)
 - [ ] Escopo automático de queries por tenant (Prisma middleware ou extension)
@@ -78,7 +78,7 @@ Legenda: `[x]` feito · `[ ]` pendente
 - [ ] Frontend: client realtime integrado ao dashboard
 
 ## 11. Auditoria
-- [ ] Modelagem de `AuditLog` (quem, o quê, quando, tenant)
+- [x] Modelagem de `AuditLog` (quem, o quê, quando, tenant)
 - [ ] Interceptor/middleware de captura automática de mutações
 - [ ] Endpoint de consulta de logs de auditoria (admin)
 
