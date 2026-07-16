@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: root123
-      MYSQL_DATABASE: logistics_db
+      MYSQL_DATABASE: logisense_db
       MYSQL_USER: logistics
       MYSQL_PASSWORD: logistics123
     ports:
