@@ -10,7 +10,7 @@ Legenda: `[x]` feito · `[ ]` pendente
 - [x] Monorepo pnpm + turbo (`apps/`, `packages/`)
 - [x] `apps/api` NestJS inicial (health check, config/env validation, PrismaModule)
 - [x] docker-compose dev (MySQL, Redis, Adminer)
-- [ ] `apps/web` scaffold Next.js
+- [x] `apps/web` scaffold Next.js
 
 ## 1. Autenticação & Autorização
 - [ ] Modelagem `User`, `Role`, `Permission` no Prisma
@@ -29,14 +29,14 @@ Legenda: `[x]` feito · `[ ]` pendente
 - [ ] Planos/limites por tenant (se aplicável)
 
 ## 3. CRUDs de domínio
-- [ ] Modelagem de entidades principais (ex.: transportadoras, veículos, motoristas, clientes, pedidos/cargas)
+- [x] Modelagem de entidades principais (Carrier, Client)
 - [ ] Endpoints REST (CRUD completo) por entidade
 - [ ] Validação de DTOs (class-validator)
 - [ ] Paginação, filtros e ordenação padronizados
 - [ ] Soft delete / auditoria de exclusão
 
 ## 4. Módulo de Frete
-- [ ] Modelagem de fretes/rotas/cotações
+- [x] Modelagem de fretes/rotas/cotações (FreightQuote, FreightQuoteOption)
 - [ ] Cálculo de frete (regras de negócio, tabela de preços)
 - [ ] Integração com serviço de CEP/geolocalização
 - [ ] Rastreamento de status do frete (workflow/state machine)
@@ -112,4 +112,4 @@ Legenda: `[x]` feito · `[ ]` pendente
 ---
 
 ## Próximo passo imediato
-Scaffold do frontend Next.js em `apps/web`.
+Implementar Fase 1 (autenticação): JWT + refresh token, hash de senha, endpoints e guards.
