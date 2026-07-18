@@ -13,12 +13,12 @@ Legenda: `[x]` feito · `[ ]` pendente
 - [x] `apps/web` scaffold Next.js
 
 ## 1. Autenticação & Autorização
-- [ ] Modelagem `User`, `Role`, `Permission` no Prisma
-- [ ] Estratégia de auth (JWT access + refresh token)
-- [ ] Endpoints: registro, login, refresh, logout
-- [ ] Guards de rota (`JwtAuthGuard`, `RolesGuard`)
+- [x] Modelagem `User`, `Role` no Prisma (`Permission` granular ainda não modelado)
+- [x] Estratégia de auth (JWT access + refresh token)
+- [x] Endpoints: registro, login, refresh, logout
+- [x] Guards de rota (`JwtAuthGuard`, `RolesGuard`)
 - [ ] Recuperação/reset de senha (envio de e-mail)
-- [ ] Hash de senha (bcrypt/argon2) e políticas de força
+- [x] Hash de senha (bcrypt) e políticas de força (mínimo 8 caracteres)
 
 ## 2. Multi-tenancy
 - [x] Modelagem `Tenant`/`Organization` no Prisma
