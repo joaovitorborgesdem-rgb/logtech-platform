@@ -22,9 +22,9 @@ Legenda: `[x]` feito · `[ ]` pendente
 
 ## 2. Multi-tenancy
 - [x] Modelagem `Tenant`/`Organization` no Prisma
-- [ ] Estratégia de isolamento (schema-per-tenant vs. tenant_id em linha) — decidir e documentar
-- [ ] Middleware/interceptor de resolução de tenant (subdomínio, header ou token)
-- [ ] Escopo automático de queries por tenant (Prisma middleware ou extension)
+- [x] Estratégia de isolamento (schema-per-tenant vs. tenant_id em linha) — decidir e documentar (`docs/DECISIONS.md`, ADR-001)
+- [x] Middleware/interceptor de resolução de tenant (subdomínio, header ou token) (`TenantMiddleware` + `TenantContextInterceptor`, ADR-002)
+- [x] Escopo automático de queries por tenant (Prisma middleware ou extension) (`tenant-scoped-prisma.provider.ts`, token `TENANT_SCOPED_PRISMA` — usar nos services de domínio da Fase 3)
 - [ ] Convite e onboarding de usuários dentro de um tenant
 - [ ] Planos/limites por tenant (se aplicável)
 
