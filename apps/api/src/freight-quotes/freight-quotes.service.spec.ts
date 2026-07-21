@@ -1,6 +1,7 @@
 import { NotFoundException } from "@nestjs/common";
 import { AuditAction, FreightQuoteStatus } from "@prisma/client";
 import { TenantScopedPrismaClient } from "../prisma/tenant-scoped-prisma.provider";
+import { FreightCalculationService } from "./freight-calculation.service";
 import { FreightQuotesService } from "./freight-quotes.service";
 
 describe("FreightQuotesService", () => {
@@ -15,6 +16,7 @@ describe("FreightQuotesService", () => {
     };
     auditLog: { create: jest.Mock };
   };
+  let freightCalculationService: { generateOptions: jest.Mock };
 
   const baseQuote = {
     id: "quote-1",
@@ -27,11 +29,13 @@ describe("FreightQuotesService", () => {
     widthCm: 30,
     heightCm: 20,
     cargoValue: 500,
-    status: FreightQuoteStatus.PENDING,
+    status: FreightQuoteStatus.PROCESSING,
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
   };
+
+  const baseQuoteWithOptions = { ...baseQuote, options: [] };
 
   beforeEach(() => {
     prisma = {
@@ -44,9 +48,11 @@ describe("FreightQuotesService", () => {
       },
       auditLog: { create: jest.fn() },
     };
+    freightCalculationService = { generateOptions: jest.fn() };
 
     service = new FreightQuotesService(
       prisma as unknown as TenantScopedPrismaClient,
+      freightCalculationService as unknown as FreightCalculationService,
     );
   });
 
@@ -55,8 +61,13 @@ describe("FreightQuotesService", () => {
   });
 
   describe("create", () => {
-    it("cria uma cotação de frete vinculada ao usuário atual", async () => {
+    it("cria uma cotação de frete vinculada ao usuário atual e calcula as opções", async () => {
       prisma.freightQuote.create.mockResolvedValue(baseQuote);
+      freightCalculationService.generateOptions.mockResolvedValue(undefined);
+      prisma.freightQuote.findFirst.mockResolvedValue({
+        ...baseQuoteWithOptions,
+        status: FreightQuoteStatus.DONE,
+      });
 
       const result = await service.create(
         {
@@ -71,11 +82,49 @@ describe("FreightQuotesService", () => {
         "user-1",
       );
 
-      expect(result).toEqual(baseQuote);
+      expect(result.status).toBe(FreightQuoteStatus.DONE);
       const [createCall] = prisma.freightQuote.create.mock.calls as Array<
-        [{ data: { userId: string } }]
+        [{ data: { userId: string; status: FreightQuoteStatus } }]
       >;
       expect(createCall[0].data.userId).toBe("user-1");
+      expect(createCall[0].data.status).toBe(FreightQuoteStatus.PROCESSING);
+      expect(freightCalculationService.generateOptions).toHaveBeenCalledWith(
+        baseQuote,
+      );
+    });
+
+    it("marca a cotação como ERROR quando o cálculo falha", async () => {
+      prisma.freightQuote.create.mockResolvedValue(baseQuote);
+      freightCalculationService.generateOptions.mockRejectedValue(
+        new Error("falha no cálculo"),
+      );
+      prisma.freightQuote.update.mockResolvedValue({
+        ...baseQuote,
+        status: FreightQuoteStatus.ERROR,
+      });
+      prisma.freightQuote.findFirst.mockResolvedValue({
+        ...baseQuoteWithOptions,
+        status: FreightQuoteStatus.ERROR,
+      });
+
+      const result = await service.create(
+        {
+          originZipCode: "01310-100",
+          destinationZipCode: "20040-020",
+          weightKg: 12.5,
+          lengthCm: 40,
+          widthCm: 30,
+          heightCm: 20,
+          cargoValue: 500,
+        },
+        "user-1",
+      );
+
+      expect(result.status).toBe(FreightQuoteStatus.ERROR);
+      expect(prisma.freightQuote.update).toHaveBeenCalledWith({
+        where: { id: "quote-1" },
+        data: { status: FreightQuoteStatus.ERROR },
+      });
     });
   });
 
@@ -121,12 +170,20 @@ describe("FreightQuotesService", () => {
   });
 
   describe("findOne", () => {
-    it("retorna a cotação quando encontrada", async () => {
-      prisma.freightQuote.findFirst.mockResolvedValue(baseQuote);
+    it("retorna a cotação com as opções calculadas quando encontrada", async () => {
+      prisma.freightQuote.findFirst.mockResolvedValue(baseQuoteWithOptions);
 
       const result = await service.findOne("quote-1");
 
-      expect(result).toEqual(baseQuote);
+      expect(result).toEqual(baseQuoteWithOptions);
+      const [findFirstCall] = prisma.freightQuote.findFirst.mock.calls as Array<
+        [{ where: { id: string; deletedAt: null }; include: object }]
+      >;
+      expect(findFirstCall[0].where).toEqual({
+        id: "quote-1",
+        deletedAt: null,
+      });
+      expect(findFirstCall[0].include).toBeDefined();
     });
 
     it("lança NotFoundException quando não encontrada", async () => {
@@ -140,7 +197,7 @@ describe("FreightQuotesService", () => {
 
   describe("update", () => {
     it("atualiza a cotação existente", async () => {
-      prisma.freightQuote.findFirst.mockResolvedValue(baseQuote);
+      prisma.freightQuote.findFirst.mockResolvedValue(baseQuoteWithOptions);
       prisma.freightQuote.update.mockResolvedValue({
         ...baseQuote,
         status: FreightQuoteStatus.PROCESSING,
@@ -165,7 +222,7 @@ describe("FreightQuotesService", () => {
 
   describe("remove", () => {
     it("marca deletedAt e registra auditoria", async () => {
-      prisma.freightQuote.findFirst.mockResolvedValue(baseQuote);
+      prisma.freightQuote.findFirst.mockResolvedValue(baseQuoteWithOptions);
       prisma.freightQuote.update.mockResolvedValue({
         ...baseQuote,
         deletedAt: new Date(),

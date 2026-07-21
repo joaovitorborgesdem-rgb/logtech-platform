@@ -184,3 +184,65 @@ preenchimento (o usuário sempre pode digitar o CEP manualmente), o custo de
 uma falha isolada é baixo, então não implementamos retry agora. Rate
 limiting, retry e circuit breaker genéricos para integrações externas ficam
 para quando houver uma segunda integração real (Fase 7 do roadmap).
+
+---
+
+## ADR-005: Cálculo de frete — regras de precificação e estimativa de distância
+
+**Status:** Aceito
+
+### Contexto
+
+A Fase 4 exige gerar `FreightQuoteOption` (preço + prazo) por transportadora
+a partir de peso, dimensões, valor da carga e distância entre os CEPs de
+origem/destino. Não há orçamento nem integração contratada para geocodificação
+real (a ViaCEP, ver ADR-004, não retorna latitude/longitude, apenas endereço e
+código IBGE do município).
+
+### Decisão
+
+**Precificação por transportadora** (`Carrier`, novos campos com `@default`
+para não quebrar registros existentes): `basePrice`, `pricePerKg`,
+`pricePerKm`, `insuranceRate` (percentual sobre `cargoValue`),
+`avgSpeedKmPerDay` e `handlingDays` (dias de manuseio antes do transporte
+em si). Fórmula (`freight-pricing.util.ts`):
+
+```
+pesoCubicoKg = (comprimentoCm * larguraCm * alturaCm) / 6000  // divisor volumétrico padrão rodoviário
+pesoTaxavelKg = max(pesoKg, pesoCubicoKg)
+preco = basePrice + pricePerKg * pesoTaxavelKg + pricePerKm * distanciaKm + insuranceRate * valorCarga
+prazoDias = handlingDays + max(1, ceil(distanciaKm / avgSpeedKmPerDay))
+```
+
+**Estimativa de distância a partir do CEP**: como não há geocodificação, a
+distância é aproximada por uma matriz fixa de distância (km) entre as 10
+macrorregiões postais do Brasil (primeiro dígito do CEP, 0-9), somada a um
+ajuste fino proporcional à diferença entre os 5 primeiros dígitos dos CEPs de
+origem/destino (até 150 km de variação), para que CEPs diferentes dentro da
+mesma região não produzam sempre a mesma distância. Implementado em
+`estimateDistanceKm` (`freight-pricing.util.ts`).
+
+**Fluxo em `FreightQuotesService.create`**: a cotação é criada com status
+`PROCESSING`, `FreightCalculationService.generateOptions` busca as
+transportadoras ativas do tenant (`Carrier.active = true`), cria uma
+`FreightQuoteOption` por transportadora e marca a cotação como `DONE`. Se não
+houver transportadora ativa, a cotação é marcada `DONE` sem opções (não é
+tratado como erro — a ausência de transportadoras cadastradas é uma condição
+válida de operação, não uma falha de cálculo). Se o cálculo lançar exceção, a
+cotação é marcada `ERROR` e o erro é logado — o endpoint `POST
+/freight-quotes` sempre responde 201 com o estado final da cotação, nunca
+propaga a falha de cálculo como erro HTTP.
+
+### Rejeitado
+
+Geocodificação real (ex.: Google Maps Distance Matrix, OpenRouteService) foi
+adiada por exigir credenciais/custo externo não disponível nesta sessão. A
+aproximação por região postal é suficiente para uma precificação plausível e
+determinística; se uma integração real for contratada no futuro, basta trocar
+a implementação de `estimateDistanceKm` sem alterar o restante do fluxo.
+
+### Limitação conhecida
+
+A Fase 4 processa o cálculo de forma síncrona dentro da requisição HTTP de
+criação (`POST /freight-quotes`). A Fase 9 (BullMQ) move esse processamento
+para um worker assíncrono — ver ADR-006.

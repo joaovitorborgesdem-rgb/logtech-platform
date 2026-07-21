@@ -1,10 +1,14 @@
 import {
   IsBoolean,
   IsEmail,
+  IsInt,
+  IsNumber,
   IsOptional,
+  IsPositive,
   IsString,
   Length,
   MaxLength,
+  Min,
   MinLength,
 } from "class-validator";
 
@@ -40,4 +44,34 @@ export class CreateCarrierDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  basePrice?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  pricePerKg?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  pricePerKm?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  insuranceRate?: number;
+
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  avgSpeedKmPerDay?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  handlingDays?: number;
 }

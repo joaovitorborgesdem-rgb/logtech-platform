@@ -7,6 +7,14 @@ import { useAuth } from "@/lib/auth-context";
 import { CepSearch } from "@/components/cep-search";
 import { cmToMeters, kgToTons, metersToCm, tonsToKg } from "@/lib/units";
 
+interface FreightQuoteOption {
+  id: string;
+  carrierId: string;
+  carrier: { id: string; name: string };
+  price: string;
+  estimatedDays: number | null;
+}
+
 interface FreightQuote {
   id: string;
   originZipCode: string;
@@ -17,6 +25,7 @@ interface FreightQuote {
   heightCm: string;
   cargoValue: string;
   status: string;
+  options: FreightQuoteOption[];
 }
 
 export default function NewFreightQuotePage() {
@@ -215,6 +224,41 @@ export default function NewFreightQuotePage() {
             </li>
             <li>Origem → Destino: {createdQuote.originZipCode} → {createdQuote.destinationZipCode}</li>
           </ul>
+
+          {createdQuote.options.length > 0 ? (
+            <table className="mt-4 w-full text-left text-sm text-green-900 dark:text-green-100">
+              <thead>
+                <tr className="border-b border-green-300 dark:border-green-800">
+                  <th className="py-1 pr-4 font-medium">Transportadora</th>
+                  <th className="py-1 pr-4 font-medium">Preço</th>
+                  <th className="py-1 font-medium">Prazo estimado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {createdQuote.options.map((option) => (
+                  <tr key={option.id} className="border-b border-green-200 dark:border-green-900">
+                    <td className="py-1 pr-4">{option.carrier.name}</td>
+                    <td className="py-1 pr-4">
+                      {Number(option.price).toLocaleString("pt-BR", {
+                        style: "currency",
+                        currency: "BRL",
+                      })}
+                    </td>
+                    <td className="py-1">
+                      {option.estimatedDays ?? "—"}{" "}
+                      {option.estimatedDays === 1 ? "dia útil" : "dias úteis"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            createdQuote.status === "DONE" && (
+              <p className="mt-4">
+                Nenhuma transportadora ativa encontrada para calcular opções.
+              </p>
+            )
+          )}
         </div>
       )}
     </div>

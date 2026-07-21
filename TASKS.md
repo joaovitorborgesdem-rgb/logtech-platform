@@ -37,8 +37,12 @@ Legenda: `[x]` feito · `[ ]` pendente
 
 ## 4. Módulo de Frete
 - [x] Modelagem de fretes/rotas/cotações (FreightQuote, FreightQuoteOption)
-- [ ] Cálculo de frete (regras de negócio, tabela de preços)
-- [ ] Integração com serviço de CEP/geolocalização
+- [x] Cálculo de frete (regras de negócio, tabela de preços) — peso cúbico,
+      distância estimada por CEP e valor da carga, por transportadora ativa
+      (`FreightCalculationService`, ver ADR-005)
+- [x] Integração com serviço de CEP/geolocalização — distância estimada a
+      partir da macrorregião do CEP (aproximação, sem geocodificação real;
+      ver limitação conhecida na ADR-005)
 - [ ] Rastreamento de status do frete (workflow/state machine)
 - [ ] Histórico de eventos por frete
 

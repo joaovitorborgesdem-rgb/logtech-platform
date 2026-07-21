@@ -1,5 +1,10 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { AuditAction, FreightQuote, Prisma } from "@prisma/client";
+import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  AuditAction,
+  FreightQuote,
+  FreightQuoteStatus,
+  Prisma,
+} from "@prisma/client";
 import { PaginatedResult } from "../common/interfaces/paginated-result.interface";
 import { buildPaginatedResult } from "../common/pagination.util";
 import {
@@ -9,24 +14,54 @@ import {
 import { CreateFreightQuoteDto } from "./dto/create-freight-quote.dto";
 import { FreightQuoteQueryDto } from "./dto/freight-quote-query.dto";
 import { UpdateFreightQuoteDto } from "./dto/update-freight-quote.dto";
+import { FreightCalculationService } from "./freight-calculation.service";
+
+const QUOTE_WITH_OPTIONS_INCLUDE = {
+  options: {
+    include: { carrier: { select: { id: true, name: true } } },
+  },
+} satisfies Prisma.FreightQuoteInclude;
+
+export type FreightQuoteWithOptions = Prisma.FreightQuoteGetPayload<{
+  include: typeof QUOTE_WITH_OPTIONS_INCLUDE;
+}>;
 
 @Injectable()
 export class FreightQuotesService {
+  private readonly logger = new Logger(FreightQuotesService.name);
+
   constructor(
     @Inject(TENANT_SCOPED_PRISMA)
     private readonly prisma: TenantScopedPrismaClient,
+    private readonly freightCalculationService: FreightCalculationService,
   ) {}
 
   async create(
     dto: CreateFreightQuoteDto,
     userId: string,
-  ): Promise<FreightQuote> {
-    return this.prisma.freightQuote.create({
+  ): Promise<FreightQuoteWithOptions> {
+    const quote = await this.prisma.freightQuote.create({
       data: {
         ...dto,
         userId,
+        status: FreightQuoteStatus.PROCESSING,
       } as unknown as Prisma.FreightQuoteUncheckedCreateInput,
     });
+
+    try {
+      await this.freightCalculationService.generateOptions(quote);
+    } catch (error) {
+      this.logger.error(
+        `Falha ao calcular opções de frete para a cotação ${quote.id}`,
+        error as Error,
+      );
+      await this.prisma.freightQuote.update({
+        where: { id: quote.id },
+        data: { status: FreightQuoteStatus.ERROR },
+      });
+    }
+
+    return this.findOne(quote.id);
   }
 
   async findAll(
@@ -62,9 +97,10 @@ export class FreightQuotesService {
     return buildPaginatedResult(data, page, limit, total);
   }
 
-  async findOne(id: string): Promise<FreightQuote> {
+  async findOne(id: string): Promise<FreightQuoteWithOptions> {
     const quote = await this.prisma.freightQuote.findFirst({
       where: { id, deletedAt: null },
+      include: QUOTE_WITH_OPTIONS_INCLUDE,
     });
 
     if (!quote) {
