@@ -7,7 +7,7 @@ import { ConfigService } from "@nestjs/config";
 import { JwtService, JwtSignOptions } from "@nestjs/jwt";
 import { AuditAction, User, UserRole, UserStatus } from "@prisma/client";
 import * as bcrypt from "bcrypt";
-import { createHash, randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { LoginDto } from "./dto/login.dto";
 import { RegisterDto } from "./dto/register.dto";
@@ -58,6 +58,7 @@ export class AuthService {
         data: {
           name: dto.tenantName,
           slug: dto.tenantSlug,
+          webhookSecret: randomBytes(32).toString("hex"),
         },
       });
 

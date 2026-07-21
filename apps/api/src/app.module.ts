@@ -11,11 +11,14 @@ import { DashboardModule } from "./dashboard/dashboard.module";
 import { FreightQuotesModule } from "./freight-quotes/freight-quotes.module";
 import { HealthModule } from "./health/health.module";
 import { InsightsModule } from "./insights/insights.module";
+import { CnpjModule } from "./integrations/cnpj/cnpj.module";
+import { IntegrationsCommonModule } from "./integrations/common/integrations-common.module";
 import { ViaCepModule } from "./integrations/viacep/viacep.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { RedisModule } from "./redis/redis.module";
 import { TenantMiddleware } from "./tenant/tenant.middleware";
 import { TenantModule } from "./tenant/tenant.module";
+import { WebhooksModule } from "./webhooks/webhooks.module";
 
 @Module({
   imports: [
@@ -34,6 +37,7 @@ import { TenantModule } from "./tenant/tenant.module";
     }),
     PrismaModule,
     RedisModule,
+    IntegrationsCommonModule,
     HealthModule,
     AuthModule,
     TenantModule,
@@ -41,8 +45,10 @@ import { TenantModule } from "./tenant/tenant.module";
     ClientsModule,
     FreightQuotesModule,
     ViaCepModule,
+    CnpjModule,
     DashboardModule,
     InsightsModule,
+    WebhooksModule,
   ],
   controllers: [AppController],
   providers: [AppService],

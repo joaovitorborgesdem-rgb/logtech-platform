@@ -498,3 +498,98 @@ reprocessar um dia específico manualmente (backfill) sem esperar o cron.
 criados/ativos antes desta fase — o histórico anterior à primeira execução
 do cron (ou a um backfill manual via `POST /insights/aggregate`) simplesmente
 não existe, e `GET /insights/trend` retorna zero para esses dias.
+
+---
+
+## ADR-010: Resiliência de integrações externas, segunda integração (CNPJ) e webhooks de entrada
+
+**Status:** Aceito
+
+### Contexto
+
+A ADR-004 (Fase 3) deixou explicitamente para depois "rate limiting, retry e
+circuit breaker genéricos para integrações externas... para quando houver uma
+segunda integração real". A Fase 7 traz essa segunda integração e fecha os
+itens restantes do roadmap: resiliência genérica e webhooks de entrada.
+
+### Cliente HTTP resiliente (`ResilientHttpClient`)
+
+`apps/api/src/integrations/common/`: um `ResilientHttpClient` genérico,
+reutilizado por qualquer integração HTTP externa (hoje: ViaCEP e BrasilAPI/CNPJ):
+
+- **Retry com backoff exponencial** (`baseDelayMs * 2^(tentativa-1)`, 3
+  tentativas por padrão) apenas para falhas de rede/timeout e respostas 5xx.
+  Respostas 4xx **não são retryable** (a requisição está errada — tentar de
+  novo não muda o resultado) e não contam como falha do circuito, já que a
+  API respondeu normalmente.
+- **Rate limiting** (`RateLimiter`): intervalo mínimo entre chamadas por
+  integração (`minIntervalMs`, default 100ms) — simples espaçamento
+  sequencial, não um token bucket completo, suficiente para não sobrecarregar
+  APIs públicas gratuitas.
+- **Circuit breaker** (`CircuitBreaker`): abre após N falhas consecutivas
+  (default 5) e passa a rejeitar imediatamente sem tentar a rede
+  (`ServiceUnavailableException`) até o cooldown (default 30s), quando entra
+  em `HALF_OPEN` e permite uma nova tentativa.
+- Estado (breaker/limiter) é mantido **em memória, por nome de integração**,
+  num singleton por processo — não é compartilhado entre réplicas da API.
+  Aceitável nesta fase (sem múltiplas réplicas em produção ainda); se isso
+  mudar, o estado precisaria migrar para Redis (já disponível) para ficar
+  consistente entre instâncias.
+- **`User-Agent` explícito** (`LogiSense/1.0`) em toda requisição — descoberto
+  necessário na prática: a BrasilAPI (atrás de proteção anti-bot) retorna 403
+  para o `fetch` padrão do Node (undici) sem um `User-Agent` identificável,
+  mas aceita normalmente requisições de `curl` ou com um `User-Agent`
+  reconhecível. Boa prática padrão para qualquer cliente HTTP server-side,
+  não uma tentativa de evasão.
+
+`ViaCepService` foi refatorado para usar `ResilientHttpClient` em vez de
+`fetch` direto (contrato externo inalterado: continua lançando
+`BadGatewayException` em falha).
+
+### Segunda integração: consulta de CNPJ (BrasilAPI)
+
+`GET /integrations/cnpj/:cnpj` (protegido por `JwtAuthGuard`, mesmo padrão das
+demais integrações) consulta `https://brasilapi.com.br/api/cnpj/v1/{cnpj}`
+(API pública, sem chave) e devolve razão social, nome fantasia, endereço,
+telefone e situação cadastral — útil para pré-preencher o cadastro de
+`Carrier`/`Client` a partir do CNPJ (campo `document` já existente). 404 da
+BrasilAPI vira `NotFoundException`; outros 4xx viram `BadGatewayException`;
+falhas do circuit breaker propagam como `ServiceUnavailableException` (503).
+Não há UI no frontend para isso nesta fase — não existe ainda tela de
+cadastro de `Carrier`/`Client` no `apps/web` para acoplar o preenchimento
+automático (fora do escopo desta fase).
+
+### Webhooks de entrada
+
+`POST /webhooks/carriers/:tenantSlug` recebe eventos de um sistema externo
+(simulação de uma transportadora notificando status de entrega). Não passa
+por `JwtAuthGuard` — quem chama não tem sessão de usuário — a autenticação é
+por **assinatura HMAC-SHA256** do corpo cru da requisição
+(`X-Webhook-Signature`), verificada contra `Tenant.webhookSecret` (novo campo,
+gerado via `crypto.randomBytes(32)` no registro do tenant, nulo para tenants
+criados antes desta fase). `app.rawBody: true` no bootstrap
+(`NestFactory.create(AppModule, { rawBody: true })`) expõe `request.rawBody`
+para a verificação de assinatura — HMAC precisa dos bytes exatos recebidos,
+não do JSON re-serializado. Evento válido é persistido em `AuditLog`
+(`EXTERNAL_WEBHOOK_RECEIVED`) com o payload em `metadata` — sem inventar uma
+tabela de rastreamento de frete dedicada (isso pertence ao item ainda aberto
+"Rastreamento de status do frete" da Fase 4).
+
+### Rejeitado
+
+- Segredo de webhook único e global via env var foi rejeitado em favor de um
+  segredo por tenant (`Tenant.webhookSecret`), consistente com o resto do
+  projeto tratando isolamento de tenant como requisito de primeira classe
+  (ADR-001/002) — cada tenant deve poder ter seu segredo próprio, revogável
+  independentemente.
+- Layout de PDF elaborado ou uma tabela real de eventos de rastreamento não
+  foram construídos aqui — decisão de manter o escopo da Fase 7 restrito a
+  resiliência + uma integração real + um endpoint de webhook.
+
+### Limitação conhecida
+
+Estado do circuit breaker/rate limiter não sobrevive a um restart do
+processo nem é compartilhado entre réplicas (ver acima). Tenants criados
+antes desta migração têm `webhookSecret = null` e não conseguem receber
+webhooks até que um fluxo de rotação/geração de segredo seja adicionado (hoje
+só existe geração no registro).

@@ -37,6 +37,7 @@ enum AuditAction {
   CARRIER_DELETED
   CLIENT_DELETED
   FREIGHT_QUOTE_DELETED
+  EXTERNAL_WEBHOOK_RECEIVED
 }
 
 enum FreightQuoteStatus {
@@ -47,10 +48,11 @@ enum FreightQuoteStatus {
 }
 
 model Tenant {
-  id     String       @id @default(cuid())
-  name   String
-  slug   String       @unique
-  status TenantStatus @default(ACTIVE)
+  id            String       @id @default(cuid())
+  name          String
+  slug          String       @unique
+  status        TenantStatus @default(ACTIVE)
+  webhookSecret String?
 
   users                 User[]
   auditLogs             AuditLog[]

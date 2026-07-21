@@ -1,4 +1,5 @@
-import { BadGatewayException, Injectable, Logger } from "@nestjs/common";
+import { BadGatewayException, Injectable } from "@nestjs/common";
+import { ResilientHttpClient } from "../common/resilient-http-client";
 
 export interface ViaCepAddress {
   cep: string;
@@ -13,11 +14,11 @@ export interface ViaCepAddress {
   siafi: string;
 }
 
-const REQUEST_TIMEOUT_MS = 5000;
+const INTEGRATION_NAME = "viacep";
 
 @Injectable()
 export class ViaCepService {
-  private readonly logger = new Logger(ViaCepService.name);
+  constructor(private readonly httpClient: ResilientHttpClient) {}
 
   async searchByAddress(
     uf: string,
@@ -26,24 +27,14 @@ export class ViaCepService {
   ): Promise<ViaCepAddress[]> {
     const url = `https://viacep.com.br/ws/${encodeURIComponent(uf)}/${encodeURIComponent(city)}/${encodeURIComponent(street)}/json/`;
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-    let response: Response;
+    let data: unknown;
     try {
-      response = await fetch(url, { signal: controller.signal });
-    } catch (error) {
-      this.logger.error("Erro ao consultar ViaCEP", error as Error);
-      throw new BadGatewayException("Falha ao consultar o serviço de CEP");
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    if (!response.ok) {
+      data = await this.httpClient.fetchJson<unknown>(url, {
+        integrationName: INTEGRATION_NAME,
+      });
+    } catch {
       throw new BadGatewayException("Falha ao consultar o serviço de CEP");
     }
-
-    const data: unknown = await response.json();
 
     return Array.isArray(data) ? (data as ViaCepAddress[]) : [];
   }

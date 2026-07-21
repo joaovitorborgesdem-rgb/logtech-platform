@@ -1,14 +1,14 @@
 import { BadGatewayException } from "@nestjs/common";
+import { ResilientHttpClient } from "../common/resilient-http-client";
 import { ViaCepService } from "./viacep.service";
 
 describe("ViaCepService", () => {
   let service: ViaCepService;
-  let fetchMock: jest.Mock;
+  let httpClient: { fetchJson: jest.Mock };
 
   beforeEach(() => {
-    service = new ViaCepService();
-    fetchMock = jest.fn();
-    global.fetch = fetchMock;
+    httpClient = { fetchJson: jest.fn() };
+    service = new ViaCepService(httpClient as unknown as ResilientHttpClient);
   });
 
   afterEach(() => {
@@ -30,10 +30,7 @@ describe("ViaCepService", () => {
         siafi: "7107",
       },
     ];
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(addresses),
-    });
+    httpClient.fetchJson.mockResolvedValue(addresses);
 
     const result = await service.searchByAddress(
       "SP",
@@ -42,33 +39,26 @@ describe("ViaCepService", () => {
     );
 
     expect(result).toEqual(addresses);
-    const [url] = fetchMock.mock.calls[0] as [string];
+    const [url, options] = httpClient.fetchJson.mock.calls[0] as [
+      string,
+      { integrationName: string },
+    ];
     expect(url).toBe(
       "https://viacep.com.br/ws/SP/S%C3%A3o%20Paulo/Avenida%20Paulista/json/",
     );
+    expect(options.integrationName).toBe("viacep");
   });
 
   it("retorna array vazio quando a ViaCEP não encontra resultados", async () => {
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ erro: true }),
-    });
+    httpClient.fetchJson.mockResolvedValue({ erro: true });
 
     const result = await service.searchByAddress("SP", "Cidade", "Rua X");
 
     expect(result).toEqual([]);
   });
 
-  it("lança BadGatewayException quando a resposta não é ok", async () => {
-    fetchMock.mockResolvedValue({ ok: false });
-
-    await expect(
-      service.searchByAddress("SP", "Cidade", "Rua X"),
-    ).rejects.toBeInstanceOf(BadGatewayException);
-  });
-
-  it("lança BadGatewayException quando a requisição falha", async () => {
-    fetchMock.mockRejectedValue(new Error("network error"));
+  it("lança BadGatewayException quando o cliente HTTP falha", async () => {
+    httpClient.fetchJson.mockRejectedValue(new Error("falha na integração"));
 
     await expect(
       service.searchByAddress("SP", "Cidade", "Rua X"),

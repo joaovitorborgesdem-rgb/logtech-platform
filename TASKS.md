@@ -67,10 +67,10 @@ Legenda: `[x]` feito · `[ ]` pendente
 - [x] Exportação de relatórios (CSV/PDF) — `GET /insights/export?format=csv|pdf`
 
 ## 7. Integrações externas
-- [x] Definir integrações necessárias (ex.: correios, transportadoras, ERPs, gateways de pagamento) — ViaCEP (busca de CEP por localidade) implementada na Fase 3, ver ADR-004
-- [x] Camada de adapters/clients isolada por integração (`src/integrations/viacep/`, padrão a replicar para novas integrações)
-- [ ] Tratamento de rate limit, retry e circuit breaker
-- [ ] Webhooks de entrada (recebimento de eventos externos)
+- [x] Definir integrações necessárias (ex.: correios, transportadoras, ERPs, gateways de pagamento) — ViaCEP (busca de CEP por localidade) implementada na Fase 3, ver ADR-004; consulta de CNPJ (BrasilAPI) adicionada na Fase 7, ver ADR-010
+- [x] Camada de adapters/clients isolada por integração (`src/integrations/viacep/`, `src/integrations/cnpj/`, ambas sobre `src/integrations/common/resilient-http-client.ts`)
+- [x] Tratamento de rate limit, retry e circuit breaker — `ResilientHttpClient` genérico (retry com backoff exponencial, rate limiter e circuit breaker por integração), ver ADR-010
+- [x] Webhooks de entrada (recebimento de eventos externos) — `POST /webhooks/carriers/:tenantSlug`, autenticado por assinatura HMAC (`Tenant.webhookSecret`), ver ADR-010
 
 ## 8. Upload de arquivos
 - [ ] Estratégia de storage (S3-compatible / local em dev)
