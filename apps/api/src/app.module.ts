@@ -7,10 +7,12 @@ import { AuthModule } from "./auth/auth.module";
 import { CarriersModule } from "./carriers/carriers.module";
 import { ClientsModule } from "./clients/clients.module";
 import { validate } from "./config/env.validation";
+import { DashboardModule } from "./dashboard/dashboard.module";
 import { FreightQuotesModule } from "./freight-quotes/freight-quotes.module";
 import { HealthModule } from "./health/health.module";
 import { ViaCepModule } from "./integrations/viacep/viacep.module";
 import { PrismaModule } from "./prisma/prisma.module";
+import { RedisModule } from "./redis/redis.module";
 import { TenantMiddleware } from "./tenant/tenant.middleware";
 import { TenantModule } from "./tenant/tenant.module";
 
@@ -30,6 +32,7 @@ import { TenantModule } from "./tenant/tenant.module";
       }),
     }),
     PrismaModule,
+    RedisModule,
     HealthModule,
     AuthModule,
     TenantModule,
@@ -37,6 +40,7 @@ import { TenantModule } from "./tenant/tenant.module";
     ClientsModule,
     FreightQuotesModule,
     ViaCepModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -47,9 +47,12 @@ Legenda: `[x]` feito · `[ ]` pendente
 - [ ] Histórico de eventos por frete
 
 ## 5. Dashboard
-- [ ] Endpoints de agregação/métricas (KPIs operacionais)
-- [ ] Cache de métricas (Redis)
-- [ ] Frontend: layout do dashboard com widgets/gráficos
+- [x] Endpoints de agregação/métricas (KPIs operacionais) — `GET
+      /dashboard/metrics` (total de cotações, contagem por status, preço
+      médio, transportadoras/clientes ativos, taxa de erro, série de 7 dias;
+      ver ADR-008)
+- [x] Cache de métricas (Redis) — `RedisService`, TTL de 30s por tenant
+- [x] Frontend: layout do dashboard com widgets/gráficos — `/dashboard`
 
 ## 6. Insights / Analytics
 - [ ] Definição das métricas de negócio a serem calculadas

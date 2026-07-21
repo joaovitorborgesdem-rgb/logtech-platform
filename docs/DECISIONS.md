@@ -359,3 +359,53 @@ duração (o socket permanece conectado; uma nova conexão após expiração exi
 um novo token). Aceitável para o escopo atual (o usuário fica na página de
 simulação por poucos segundos, tempo de vida bem menor que
 `JWT_ACCESS_EXPIRES_IN`).
+
+---
+
+## ADR-008: Endpoints de métricas do Dashboard e cache em Redis
+
+**Status:** Aceito
+
+### Contexto
+
+A Fase 5 exige endpoints de agregação/KPIs operacionais para o dashboard e
+cache de métricas em Redis (já disponível desde a Fase 9, ver ADR-006).
+
+### Decisão
+
+- `GET /dashboard/metrics` (protegido por `JwtAuthGuard`, escopo por tenant
+  via `TENANT_SCOPED_PRISMA`) retorna: total de cotações de frete, contagem
+  por status (`PENDING`/`PROCESSING`/`DONE`/`ERROR`), preço médio das opções
+  de cotações `DONE`, total de transportadoras ativas, total de clientes,
+  taxa de erro e uma série dos últimos 7 dias (cotações criadas por dia) —
+  `DashboardService.computeMetrics`.
+- **Preço médio via `FreightQuoteOption.aggregate`**: como esse modelo não tem
+  `tenantId` direto (ver limitação conhecida da ADR-002), o filtro de tenant é
+  aplicado manualmente pela relação (`where: { quote: { tenantId, ... } }`),
+  usando o `tenantId` do `AsyncLocalStorage` (`getTenantContext()`).
+- **Cache**: `RedisService` (`apps/api/src/redis/`, `ioredis`, mesmo
+  `REDIS_HOST`/`REDIS_PORT` da fila) guarda o JSON serializado das métricas
+  em `dashboard:metrics:{tenantId}` por 30 segundos (`CACHE_TTL_SECONDS`). Sem
+  invalidação ativa nas mutações (criar frete, transportadora, etc.) — um TTL
+  curto foi escolhido por simplicidade, já que o dashboard tolera uma janela
+  pequena de desatualização e evitar invalidação espalhada por vários services
+  de domínio reduz acoplamento.
+- `RedisModule` é `@Global()` (mesmo padrão do `PrismaModule`), então
+  `RedisService` fica disponível para qualquer módulo sem reimportação.
+
+### Rejeitado
+
+Invalidação ativa de cache (ex.: publicar um evento a cada mutação de
+`FreightQuote`/`Carrier`/`Client` que limpe a chave do tenant) foi descartada
+nesta fase por adicionar acoplamento entre módulos de domínio não relacionados
+e o dashboard, para um ganho pequeno (30s de latência de atualização é
+aceitável para KPIs operacionais).
+
+### Limitação conhecida
+
+A série de 7 dias é calculada buscando `createdAt` de todas as cotações do
+período e agrupando em memória (sem `GROUP BY DATE(...)` via SQL raw), o que
+é aceitável no volume de dados esperado para o estágio atual do produto mas
+não escala indefinidamente — se o volume de cotações por tenant crescer muito,
+migrar para uma agregação SQL nativa (raw query com `DATE_FORMAT`) ou uma
+tabela de métricas pré-agregada (ligado à Fase 6, jobs de agregação periódica).
