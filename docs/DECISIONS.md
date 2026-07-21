@@ -117,3 +117,70 @@ via relação). A extension não os escopa automaticamente — o isolamento dele
 depende de escopar corretamente a entidade pai (`User`/`FreightQuote`) nos
 services que os manipulam. Se isso se tornar um problema real, considerar
 desnormalizar `tenantId` para essas tabelas.
+
+---
+
+## ADR-003: Soft delete nos CRUDs de domínio
+
+**Status:** Aceito
+
+Carrier, Client e FreightQuote usam soft delete (`deletedAt DateTime?`) em vez
+de `DELETE` físico. O endpoint `DELETE` faz `UPDATE ... SET deletedAt = now()`
+e grava um `AuditLog` (`CARRIER_DELETED` / `CLIENT_DELETED` /
+`FREIGHT_QUOTE_DELETED`) com `userId` de quem removeu. Todas as leituras
+(`findAll`, `findFirst`, `update`) filtram `deletedAt: null` explicitamente
+nos services — isso **não** é feito pela Prisma client extension de
+tenant-scoping (ADR-002), que só cuida de `tenantId`; são responsabilidades
+separadas.
+
+**Trade-off aceito**: `Carrier` e `Client` têm `@@unique([tenantId, document])`
+no schema. Como o MySQL/MariaDB não suporta índice único parcial (filtrado),
+esse índice único continua contando linhas com soft delete — ou seja, não é
+possível recriar um registro com o mesmo `document` depois de removê-lo (o
+`INSERT` falhará com violação de unicidade). Se isso virar um problema real de
+produto, a solução é normalizar `document` para incluir um sufixo/timestamp no
+soft delete, ou migrar para hard delete nesses casos específicos.
+
+---
+
+## ADR-004: Integração com ViaCEP (busca de CEP por localidade)
+
+**Status:** Aceito
+
+### Contexto
+
+O formulário de simulação de frete precisa permitir que o usuário encontre o
+CEP de origem/destino a partir de UF + cidade + logradouro, quando ele não
+sabe o CEP de cor. Essa é uma das integrações externas obrigatórias do
+desafio (ver `TASKS.md`, Fase 7).
+
+### Decisão
+
+`GET /integrations/viacep/search?uf=&city=&street=` (protegido por
+`JwtAuthGuard`, mesmo padrão dos demais endpoints de domínio) consulta
+`https://viacep.com.br/ws/{uf}/{cidade}/{logradouro}/json/` no backend e
+repassa a lista de endereços encontrados para o frontend. O frontend nunca
+chama a ViaCEP diretamente — sempre via proxy do backend
+(`ViaCepService`, `apps/api/src/integrations/viacep/`), o que evita expor a
+ViaCEP diretamente ao browser (CORS, rate limit por IP de cliente) e permite
+adicionar cache/circuit breaker no futuro sem tocar no frontend.
+
+### Detalhes de implementação
+
+- Usa o `fetch` global do Node (disponível desde o Node 18, sem dependência
+  extra) com timeout de 5s via `AbortController`.
+- Erros de rede ou resposta não-OK viram `BadGatewayException` (502) — o
+  frontend trata isso como "serviço de CEP indisponível, tente novamente".
+- Resposta `{ erro: true }` da ViaCEP (quando não há match, ela retorna esse
+  objeto em vez de array vazio para buscas por CEP direto — mas para busca
+  por endereço ela retorna `[]` quando não há resultado) é tratada como lista
+  vazia por segurança, já que a extension não é um array.
+
+### Limitação conhecida (deferida para a Fase 7)
+
+Sem retry ou circuit breaker — uma falha da ViaCEP simplesmente retorna 502
+para o usuário tentar de novo. Como isso é usado apenas como conveniência de
+preenchimento (o usuário sempre pode digitar o CEP manualmente), o custo de
+uma falha isolada é baixo, então não implementamos retry agora. Rate
+limiting, retry e circuit breaker genéricos para integrações externas ficam
+para quando houver uma segunda integração real (Fase 7 do roadmap).

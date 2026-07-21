@@ -34,6 +34,9 @@ enum AuditAction {
   USER_UPDATED
   USER_DELETED
   USER_ROLE_CHANGED
+  CARRIER_DELETED
+  CLIENT_DELETED
+  FREIGHT_QUOTE_DELETED
 }
 
 enum FreightQuoteStatus {
@@ -127,8 +130,9 @@ model Carrier {
 
   quoteOptions FreightQuoteOption[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@unique([tenantId, document])
   @@index([tenantId])
@@ -152,8 +156,9 @@ model FreightQuote {
 
   options FreightQuoteOption[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@index([tenantId])
   @@index([tenantId, status])
@@ -188,8 +193,9 @@ model Client {
   city     String?
   state    String?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@unique([tenantId, document])
   @@index([tenantId])

@@ -30,10 +30,10 @@ Legenda: `[x]` feito · `[ ]` pendente
 
 ## 3. CRUDs de domínio
 - [x] Modelagem de entidades principais (Carrier, Client)
-- [ ] Endpoints REST (CRUD completo) por entidade
-- [ ] Validação de DTOs (class-validator)
-- [ ] Paginação, filtros e ordenação padronizados
-- [ ] Soft delete / auditoria de exclusão
+- [x] Endpoints REST (CRUD completo) por entidade (Carrier, Client, FreightQuote)
+- [x] Validação de DTOs (class-validator)
+- [x] Paginação, filtros e ordenação padronizados (`common/dto/pagination-query.dto.ts`)
+- [x] Soft delete / auditoria de exclusão (`deletedAt` + `AuditLog` em cada `remove()`, ver ADR-003)
 
 ## 4. Módulo de Frete
 - [x] Modelagem de fretes/rotas/cotações (FreightQuote, FreightQuoteOption)
@@ -54,8 +54,8 @@ Legenda: `[x]` feito · `[ ]` pendente
 - [ ] Exportação de relatórios (CSV/PDF)
 
 ## 7. Integrações externas
-- [ ] Definir integrações necessárias (ex.: correios, transportadoras, ERPs, gateways de pagamento)
-- [ ] Camada de adapters/clients isolada por integração
+- [x] Definir integrações necessárias (ex.: correios, transportadoras, ERPs, gateways de pagamento) — ViaCEP (busca de CEP por localidade) implementada na Fase 3, ver ADR-004
+- [x] Camada de adapters/clients isolada por integração (`src/integrations/viacep/`, padrão a replicar para novas integrações)
 - [ ] Tratamento de rate limit, retry e circuit breaker
 - [ ] Webhooks de entrada (recebimento de eventos externos)
 
