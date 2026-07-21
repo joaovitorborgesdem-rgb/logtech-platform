@@ -55,10 +55,16 @@ Legenda: `[x]` feito · `[ ]` pendente
 - [x] Frontend: layout do dashboard com widgets/gráficos — `/dashboard`
 
 ## 6. Insights / Analytics
-- [ ] Definição das métricas de negócio a serem calculadas
-- [ ] Jobs de agregação periódica (ex.: cron via BullMQ)
-- [ ] Endpoints de consulta de insights
-- [ ] Exportação de relatórios (CSV/PDF)
+- [x] Definição das métricas de negócio a serem calculadas — tendência diária
+      (cotações, valor de carga, valor cotado, preço médio) e performance por
+      transportadora; métricas por cliente adiadas (sem relação
+      `FreightQuote`↔`Client` no schema, ver ADR-009)
+- [x] Jobs de agregação periódica (cron via BullMQ) — job repetível diário
+      (01:00 UTC) em `DailyMetricsSnapshot`, com endpoint de disparo manual
+      para backfill (`POST /insights/aggregate`)
+- [x] Endpoints de consulta de insights — `GET /insights/trend`,
+      `GET /insights/carriers`
+- [x] Exportação de relatórios (CSV/PDF) — `GET /insights/export?format=csv|pdf`
 
 ## 7. Integrações externas
 - [x] Definir integrações necessárias (ex.: correios, transportadoras, ERPs, gateways de pagamento) — ViaCEP (busca de CEP por localidade) implementada na Fase 3, ver ADR-004

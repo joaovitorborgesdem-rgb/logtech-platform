@@ -409,3 +409,92 @@ período e agrupando em memória (sem `GROUP BY DATE(...)` via SQL raw), o que
 não escala indefinidamente — se o volume de cotações por tenant crescer muito,
 migrar para uma agregação SQL nativa (raw query com `DATE_FORMAT`) ou uma
 tabela de métricas pré-agregada (ligado à Fase 6, jobs de agregação periódica).
+
+---
+
+## ADR-009: Insights/Analytics — métricas de negócio, agregação periódica e exportação
+
+**Status:** Aceito
+
+### Contexto
+
+A Fase 6 exige definir métricas de negócio (além dos KPIs operacionais do
+Dashboard, Fase 5/ADR-008), calculá-las via job periódico em vez de sempre ao
+vivo, expor endpoints de consulta e permitir exportar relatórios em CSV/PDF.
+
+### Métricas de negócio definidas
+
+1. **Tendência diária** (`DailyMetricsSnapshot`, por tenant): total de
+   cotações, cotações `DONE`/`ERROR`, valor total de carga cotado
+   (`cargoValue`), valor total das opções `DONE` geradas e preço médio das
+   opções `DONE` — a mesma base de dados do Dashboard, mas numa janela maior
+   (até 180 dias) via dado pré-agregado em vez de recomputar em memória (ver
+   limitação conhecida na ADR-008).
+2. **Performance por transportadora** (`GET /insights/carriers`): volume de
+   opções geradas, preço médio e prazo médio estimado por `Carrier`,
+   ordenado por volume — indicador de que transportadoras são mais
+   cotadas/competitivas.
+3. **Client não entra nas métricas desta fase**: `FreightQuote` não tem
+   relação com `Client` no schema atual (são entidades independentes) —
+   inventar essa relação só para viabilizar "top clientes" seria mudança de
+   escopo de produto, então insights por cliente ficam de fora até essa
+   relação existir de fato.
+
+### Job de agregação periódica
+
+Fila `insights-daily-aggregation` (mesmo padrão de `@nestjs/bullmq` da
+Fase 9/ADR-006). Um job **repetível** (`repeat: { pattern: "0 1 * * *" }`,
+diariamente às 01:00 UTC) com `jobId` fixo
+(`daily-metrics-aggregation`) é registrado uma vez no `onModuleInit` de
+`InsightsService` — o `jobId` fixo evita duplicar o agendamento a cada
+restart do processo (BullMQ trata `add` com o mesmo `jobId`+`repeat` como
+idempotente).
+
+`InsightsAggregationProcessor` roda fora de qualquer contexto de tenant e
+**itera todos os tenants** (`prisma.tenant.findMany`), agregando o dia
+anterior (UTC) para cada um e fazendo `upsert` em `DailyMetricsSnapshot`
+(chave `tenantId_date`). Por isso usa `PrismaService` cru, não
+`TENANT_SCOPED_PRISMA` — não há um único tenant por job (diferente do
+`FreightQuoteCalculationProcessor`, ADR-006, que reconstrói contexto de um
+único tenant via `runWithTenantContext`). **Tenants sem cotações no dia não
+geram linha de snapshot** (evita crescimento de tabela proporcional a
+tenant × dia sem dado real).
+
+Endpoint `POST /insights/aggregate` (restrito a `OWNER`/`ADMIN` via
+`RolesGuard`) enfileira um job avulso com uma data opcional — permite
+reprocessar um dia específico manualmente (backfill) sem esperar o cron.
+
+### Endpoints
+
+- `GET /insights/trend?days=30` (1–180, default 30): combina snapshots
+  persistidos (`ontem` para trás) com o dia de **hoje calculado ao vivo**
+  (`TENANT_SCOPED_PRISMA`, mesmo racional do Dashboard) — o dia corrente
+  nunca está desatualizado, mesmo antes do cron rodar.
+- `GET /insights/carriers`: ranking ao vivo (`FreightQuoteOption.groupBy` por
+  `carrierId`, filtrado pela relação `quote.tenantId` já que
+  `FreightQuoteOption` não tem `tenantId` direto — mesma limitação da
+  ADR-002).
+- `GET /insights/export?format=csv|pdf`: relatório das cotações de frete do
+  tenant (até 500 mais recentes — `EXPORT_ROW_LIMIT` — para não gerar
+  arquivos arbitrariamente grandes), com o melhor preço entre as opções
+  calculadas. CSV é montado manualmente (sem dependência); PDF usa `pdfkit`
+  (texto simples, uma linha por cotação — sem layout de tabela elaborado,
+  suficiente para o escopo de um relatório tabular).
+
+### Rejeitado
+
+- Agregação incremental por trigger de mutação (recalcular o snapshot do dia
+  a cada `FreightQuote` criado) foi descartada pelas mesmas razões da ADR-008
+  (acoplamento entre módulos de domínio) — o job diário mais o cálculo ao
+  vivo do dia corrente já cobre a necessidade sem esse acoplamento.
+- PDF com layout de tabela (colunas alinhadas, cabeçalho repetido por página)
+  foi deixado de fora — o formato "uma linha de texto por cotação" atende ao
+  requisito de exportação sem justificar uma dependência de layout mais
+  pesada nesta fase.
+
+### Limitação conhecida
+
+`DailyMetricsSnapshot` não é populado retroativamente para tenants
+criados/ativos antes desta fase — o histórico anterior à primeira execução
+do cron (ou a um backfill manual via `POST /insights/aggregate`) simplesmente
+não existe, e `GET /insights/trend` retorna zero para esses dias.

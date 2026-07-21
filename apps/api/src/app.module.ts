@@ -10,6 +10,7 @@ import { validate } from "./config/env.validation";
 import { DashboardModule } from "./dashboard/dashboard.module";
 import { FreightQuotesModule } from "./freight-quotes/freight-quotes.module";
 import { HealthModule } from "./health/health.module";
+import { InsightsModule } from "./insights/insights.module";
 import { ViaCepModule } from "./integrations/viacep/viacep.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { RedisModule } from "./redis/redis.module";
@@ -41,6 +42,7 @@ import { TenantModule } from "./tenant/tenant.module";
     FreightQuotesModule,
     ViaCepModule,
     DashboardModule,
+    InsightsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
