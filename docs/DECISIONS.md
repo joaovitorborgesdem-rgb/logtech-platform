@@ -668,3 +668,75 @@ Sem geração de URL assinada para **upload** direto (PUT presignado) — todo
 upload passa pela API hoje, o que é aceitável para o tamanho de arquivo
 esperado (10MB) mas não escalaria para uploads grandes sem repensar esse
 fluxo.
+
+---
+
+## ADR-012: Captura automática de mutações e consulta de auditoria (admin)
+
+**Status:** Aceito
+
+### Contexto
+
+Até a Fase 10, `AuditLog` só era escrito manualmente em pontos específicos
+(`CARRIER_DELETED`, `CLIENT_DELETED`, `FREIGHT_QUOTE_DELETED`,
+`EXTERNAL_WEBHOOK_RECEIVED`, `ATTACHMENT_DELETED`) — ou seja, **toda
+criação e atualização** (`POST`/`PATCH` em Carrier, Client, FreightQuote,
+Attachment) não deixava nenhum rastro de auditoria. A Fase 11 pede um
+mecanismo automático (não manual) para capturar mutações, e um endpoint de
+consulta para admins.
+
+### Captura automática (`MutationAuditInterceptor`)
+
+Interceptor global (`APP_INTERCEPTOR`, `apps/api/src/audit/`) que:
+
+- Age apenas sobre `POST`/`PATCH`/`PUT` — `GET`/`HEAD` nunca são auditados.
+- **Ignora deliberadamente `DELETE`**: as remoções já são auditadas
+  manualmente pelos services de domínio com metadata mais rica (motivo da
+  remoção, entidade específica) — duplicar como `HTTP_MUTATION` genérico só
+  acrescentaria ruído. Esse é o único caso em que a captura automática
+  convive com auditoria manual em vez de substituí-la.
+- **Ignora `/auth` e `/webhooks`**: já têm ações específicas
+  (`REGISTER`, `LOGIN_SUCCESS`, `LOGOUT`, `EXTERNAL_WEBHOOK_RECEIVED`).
+- Usa uma única ação genérica nova, **`HTTP_MUTATION`**, com o detalhe da
+  operação em `metadata` (`method`, `path`, `resource` — primeiro segmento
+  do path —, `entityId` — do param de rota `:id` ou do campo `id` da
+  resposta). Deliberado: adicionar um novo endpoint/recurso no futuro **não
+  exige nenhuma mudança de código nem migração de schema** para ele ficar
+  auditado — é exatamente o "automático" que a fase pede. O trade-off é
+  perder a riqueza semântica de uma ação dedicada por recurso
+  (`CARRIER_CREATED` etc.); se isso for necessário depois, nada impede
+  registros manuais adicionais para casos específicos, como já acontece com
+  os deletes.
+- **Fire-and-forget**: a escrita do `AuditLog` roda depois que a resposta já
+  foi resolvida (`tap` + `void this.recordMutation(...)`, com try/catch
+  interno que só loga a falha) — uma falha ao gravar auditoria nunca derruba
+  nem atrasa a resposta ao usuário. Trade-off aceito: é um log de
+  conveniência, não um registro transacional com garantia de escrita.
+- Lê `tenantId`/`userId` do mesmo `AsyncLocalStorage` que
+  `TenantContextInterceptor` já popula (ADR-002) — sem contexto de tenant
+  (rotas públicas), nada é gravado.
+
+### Endpoint de consulta (`GET /audit-logs`)
+
+Restrito a `OWNER`/`ADMIN` (`RolesGuard`, mesmo padrão de `AuthController`).
+Paginado (`PaginationQueryDto`) com filtros por `action`, `userId` e
+intervalo de datas (`dateFrom`/`dateTo`). Escopo por tenant automático via
+`TENANT_SCOPED_PRISMA` (`AuditLog` já era um modelo tenant-scoped desde a
+Fase 2) — um admin nunca vê entradas de outro tenant nem entradas de sistema
+sem `tenantId` (`null`), que ficam de fora do filtro automático.
+
+### Rejeitado
+
+- Uma `AuditAction` dedicada por recurso e operação (`CARRIER_CREATED`,
+  `CARRIER_UPDATED`, `CLIENT_CREATED`, ...) foi rejeitada — exigiria migração
+  de schema a cada novo endpoint mutável, o oposto de "captura automática".
+- Auditar `DELETE` genericamente também via `HTTP_MUTATION` foi rejeitado
+  para não duplicar as entradas específicas já existentes.
+
+### Limitação conhecida
+
+`HTTP_MUTATION` não sabe distinguir semanticamente "criei" de "atualizei" além
+do método HTTP na própria `description`/`metadata` — não há um campo
+`operation` estruturado. Também não há política de retenção/expurgo de
+`AuditLog` (a tabela cresce indefinidamente); fica para quando isso se tornar
+um problema real de volume.

@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from "@nestjs/config";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { AttachmentsModule } from "./attachments/attachments.module";
+import { AuditModule } from "./audit/audit.module";
 import { AuthModule } from "./auth/auth.module";
 import { CarriersModule } from "./carriers/carriers.module";
 import { ClientsModule } from "./clients/clients.module";
@@ -44,6 +45,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     HealthModule,
     AuthModule,
     TenantModule,
+    AuditModule,
     CarriersModule,
     ClientsModule,
     FreightQuotesModule,

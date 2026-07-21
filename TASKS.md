@@ -108,8 +108,12 @@ Legenda: `[x]` feito · `[ ]` pendente
 
 ## 11. Auditoria
 - [x] Modelagem de `AuditLog` (quem, o quê, quando, tenant)
-- [ ] Interceptor/middleware de captura automática de mutações
-- [ ] Endpoint de consulta de logs de auditoria (admin)
+- [x] Interceptor/middleware de captura automática de mutações —
+      `MutationAuditInterceptor` (global, `POST`/`PATCH`/`PUT` →
+      `HTTP_MUTATION`; `DELETE` continua auditado manualmente com metadata
+      mais rica; ver ADR-012)
+- [x] Endpoint de consulta de logs de auditoria (admin) — `GET /audit-logs`
+      (paginado, filtros por action/userId/data, restrito a OWNER/ADMIN)
 
 ## 12. Observabilidade
 - [ ] Logging estruturado (ex.: pino) com correlação de request ID

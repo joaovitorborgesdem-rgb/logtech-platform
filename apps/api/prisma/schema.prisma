@@ -39,6 +39,7 @@ enum AuditAction {
   FREIGHT_QUOTE_DELETED
   EXTERNAL_WEBHOOK_RECEIVED
   ATTACHMENT_DELETED
+  HTTP_MUTATION
 }
 
 enum AttachmentEntityType {
