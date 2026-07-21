@@ -80,10 +80,16 @@ Legenda: `[x]` feito · `[ ]` pendente
       limitação conhecida na ADR-006)
 
 ## 10. Realtime
-- [ ] Setup WebSocket Gateway (NestJS + Socket.IO)
-- [ ] Autenticação de conexões realtime (por tenant/usuário)
-- [ ] Eventos de negócio em tempo real (ex.: status de frete, notificações)
-- [ ] Frontend: client realtime integrado ao dashboard
+- [x] Setup WebSocket Gateway (NestJS + Socket.IO) — `RealtimeGateway`,
+      namespace `/realtime` (ver ADR-007)
+- [x] Autenticação de conexões realtime (por tenant/usuário) — token de
+      acesso JWT validado no handshake, socket entra na room `tenant:{tenantId}`
+- [x] Eventos de negócio em tempo real — `freight-quote.updated` emitido pelo
+      `FreightQuoteCalculationProcessor` quando a simulação sai de
+      `PENDING`/`PROCESSING` para `DONE`/`ERROR`
+- [x] Frontend: client realtime — `apps/web/src/lib/realtime-socket.ts` e a
+      página de simulação de frete atualizam o resultado sem polling (ainda
+      não há dashboard nesta fase, ver Fase 5)
 
 ## 11. Auditoria
 - [x] Modelagem de `AuditLog` (quem, o quê, quando, tenant)

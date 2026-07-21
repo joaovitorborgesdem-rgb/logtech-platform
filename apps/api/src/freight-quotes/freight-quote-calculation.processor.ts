@@ -6,8 +6,10 @@ import {
   TENANT_SCOPED_PRISMA,
   TenantScopedPrismaClient,
 } from "../prisma/tenant-scoped-prisma.provider";
+import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { runWithTenantContext } from "../tenant/tenant-context";
 import { FreightCalculationService } from "./freight-calculation.service";
+import { QUOTE_WITH_OPTIONS_INCLUDE } from "./freight-quotes.service";
 import {
   FREIGHT_QUOTE_QUEUE,
   FreightQuoteJobData,
@@ -17,7 +19,8 @@ import {
  * Consome os jobs de cálculo de frete enfileirados por `FreightQuotesService.create`.
  * Roda fora do ciclo de vida de uma requisição HTTP, então precisa reconstruir
  * manualmente o contexto de tenant (AsyncLocalStorage) a partir do payload do
- * job antes de usar o `TENANT_SCOPED_PRISMA` — ver ADR-002 e ADR-006.
+ * job antes de usar o `TENANT_SCOPED_PRISMA` — ver ADR-002 e ADR-006. Depois
+ * de cada transição de status, notifica o frontend via WebSocket (ver ADR-007).
  */
 @Processor(FREIGHT_QUOTE_QUEUE)
 export class FreightQuoteCalculationProcessor extends WorkerHost {
@@ -27,6 +30,7 @@ export class FreightQuoteCalculationProcessor extends WorkerHost {
     @Inject(TENANT_SCOPED_PRISMA)
     private readonly prisma: TenantScopedPrismaClient,
     private readonly freightCalculationService: FreightCalculationService,
+    private readonly realtimeGateway: RealtimeGateway,
   ) {
     super();
   }
@@ -45,6 +49,7 @@ export class FreightQuoteCalculationProcessor extends WorkerHost {
       });
 
       await this.freightCalculationService.generateOptions(quote);
+      await this.emitCurrentState(quoteId, tenantId);
     });
   }
 
@@ -60,11 +65,25 @@ export class FreightQuoteCalculationProcessor extends WorkerHost {
       `Job ${job.id} de cálculo de frete falhou para a cotação ${quoteId}: ${job.failedReason}`,
     );
 
-    await runWithTenantContext({ tenantId, userId, role }, () =>
-      this.prisma.freightQuote.update({
+    await runWithTenantContext({ tenantId, userId, role }, async () => {
+      await this.prisma.freightQuote.update({
         where: { id: quoteId },
         data: { status: FreightQuoteStatus.ERROR },
-      }),
-    );
+      });
+
+      await this.emitCurrentState(quoteId, tenantId);
+    });
+  }
+
+  private async emitCurrentState(
+    quoteId: string,
+    tenantId: string,
+  ): Promise<void> {
+    const quote = await this.prisma.freightQuote.findFirstOrThrow({
+      where: { id: quoteId },
+      include: QUOTE_WITH_OPTIONS_INCLUDE,
+    });
+
+    this.realtimeGateway.emitFreightQuoteUpdated(tenantId, quote);
   }
 }

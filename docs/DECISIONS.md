@@ -299,3 +299,63 @@ Sem Bull Board ou dashboard de monitoramento de filas nesta fase (item restante
 do roadmap da Fase 9). Sem dead-letter queue explícita — jobs que falham
 definitivamente ficam no estado `failed` do Redis (visível via Redis CLI/
 Bull Board futuro), mas a cotação já reflete `ERROR` para o usuário via a API.
+
+---
+
+## ADR-007: Comunicação em tempo real via WebSocket (Socket.IO)
+
+**Status:** Aceito
+
+### Contexto
+
+A Fase 10 exige notificar o frontend quando uma simulação de frete termina de
+processar (transição `PENDING`/`PROCESSING` -> `DONE`/`ERROR`, ver ADR-006),
+sem depender de polling.
+
+### Decisão
+
+- `RealtimeGateway` (`@nestjs/websockets` + `@nestjs/platform-socket.io`,
+  namespace `/realtime`) expõe um único evento de saída,
+  `freight-quote.updated`, com o payload completo da cotação (incluindo
+  `options` e `carrier`, mesmo formato de `FreightQuotesService.findOne`).
+- **Autenticação da conexão**: o handshake do Socket.IO não passa pelos
+  guards HTTP nem pelo `TenantContextInterceptor` (ver ADR-002) — o token de
+  acesso é enviado pelo cliente via `handshake.auth.token` (ou querystring
+  como fallback) e validado manualmente em `handleConnection` com o mesmo
+  `JWT_ACCESS_SECRET` usado por `JwtStrategy`. Conexões sem token válido ou
+  com token do tipo `refresh` são desconectadas imediatamente.
+- **Isolamento por tenant**: no `handleConnection`, o socket entra numa room
+  `tenant:{tenantId}` a partir do `tenantId` do próprio token — nunca há
+  broadcast global. `RealtimeGateway.emitFreightQuoteUpdated(tenantId, quote)`
+  emite apenas para essa room, então o `FreightQuoteCalculationProcessor`
+  (que já tem `tenantId` no payload do job, ver ADR-006) consegue notificar
+  o tenant certo mesmo rodando fora do ciclo de vida HTTP.
+- **CORS do gateway**: configurado separadamente do `app.enableCors()` (que
+  não cobre o transporte do Socket.IO), lendo `CORS_ORIGIN` diretamente de
+  `process.env` nos options do decorator `@WebSocketGateway` — os options do
+  gateway são avaliados na definição da classe, então não dá para injetar
+  `ConfigService` ali; é o mesmo valor usado no bootstrap (`main.ts`).
+- **Frontend**: `apps/web/src/lib/realtime-socket.ts` cria uma conexão
+  `socket.io-client` para `/realtime` autenticada com o `accessToken` atual.
+  A página de simulação de frete (`apps/web/src/app/freight-quotes/new`)
+  abre a conexão só depois de criar a cotação, escuta
+  `freight-quote.updated` filtrando pelo `id` da cotação criada, atualiza o
+  estado local (substituindo o polling que não existia) e desconecta o
+  socket ao desmontar/trocar de cotação.
+
+### Rejeitado
+
+Reaproveitar o `TenantContextInterceptor` (`APP_INTERCEPTOR` HTTP) para o
+gateway foi descartado — ele usa `context.switchToHttp()`, que não existe em
+contexto de WebSocket (`context.switchToWs()`). Implementar a validação do
+token diretamente no `handleConnection` do gateway foi mais simples do que
+criar um guard/interceptor `Ws`-específico para um único evento de saída.
+
+### Limitação conhecida
+
+Sem heartbeat/reconexão customizados além do padrão do Socket.IO, e sem
+autenticação renovada quando o access token expira em uma conexão de longa
+duração (o socket permanece conectado; uma nova conexão após expiração exigiria
+um novo token). Aceitável para o escopo atual (o usuário fica na página de
+simulação por poucos segundos, tempo de vida bem menor que
+`JWT_ACCESS_EXPIRES_IN`).

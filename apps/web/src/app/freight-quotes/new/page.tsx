@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { ApiError, apiFetch } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { CepSearch } from "@/components/cep-search";
+import { createRealtimeSocket } from "@/lib/realtime-socket";
 import { cmToMeters, kgToTons, metersToCm, tonsToKg } from "@/lib/units";
 
 interface FreightQuoteOption {
@@ -48,6 +49,24 @@ export default function NewFreightQuotePage() {
       router.push("/login");
     }
   }, [user, router]);
+
+  useEffect(() => {
+    if (!createdQuote || !accessToken) {
+      return;
+    }
+
+    const socket = createRealtimeSocket(accessToken);
+    socket.on("freight-quote.updated", (updated: FreightQuote) => {
+      if (updated.id === createdQuote.id) {
+        setCreatedQuote(updated);
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createdQuote?.id, accessToken]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -224,6 +243,17 @@ export default function NewFreightQuotePage() {
             </li>
             <li>Origem → Destino: {createdQuote.originZipCode} → {createdQuote.destinationZipCode}</li>
           </ul>
+
+          {(createdQuote.status === "PENDING" ||
+            createdQuote.status === "PROCESSING") && (
+            <p className="mt-4">Calculando opções de frete em tempo real…</p>
+          )}
+
+          {createdQuote.status === "ERROR" && (
+            <p className="mt-4 text-red-700 dark:text-red-300">
+              Falha ao calcular as opções de frete. Tente novamente.
+            </p>
+          )}
 
           {createdQuote.options.length > 0 ? (
             <table className="mt-4 w-full text-left text-sm text-green-900 dark:text-green-100">

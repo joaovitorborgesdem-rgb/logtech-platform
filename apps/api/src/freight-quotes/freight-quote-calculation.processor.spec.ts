@@ -1,6 +1,7 @@
 import { FreightQuoteStatus, UserRole } from "@prisma/client";
 import { Job } from "bullmq";
 import { TenantScopedPrismaClient } from "../prisma/tenant-scoped-prisma.provider";
+import { RealtimeGateway } from "../realtime/realtime.gateway";
 import * as tenantContext from "../tenant/tenant-context";
 import { FreightCalculationService } from "./freight-calculation.service";
 import { FreightQuoteCalculationProcessor } from "./freight-quote-calculation.processor";
@@ -12,6 +13,7 @@ describe("FreightQuoteCalculationProcessor", () => {
     freightQuote: { findFirstOrThrow: jest.Mock; update: jest.Mock };
   };
   let freightCalculationService: { generateOptions: jest.Mock };
+  let realtimeGateway: { emitFreightQuoteUpdated: jest.Mock };
   let runWithTenantContextSpy: jest.SpyInstance;
 
   const jobData: FreightQuoteJobData = {
@@ -34,14 +36,17 @@ describe("FreightQuoteCalculationProcessor", () => {
     status: FreightQuoteStatus.PENDING,
   };
 
+  const quoteWithOptions = { ...baseQuote, options: [] };
+
   beforeEach(() => {
     prisma = {
       freightQuote: {
-        findFirstOrThrow: jest.fn().mockResolvedValue(baseQuote),
+        findFirstOrThrow: jest.fn().mockResolvedValue(quoteWithOptions),
         update: jest.fn(),
       },
     };
     freightCalculationService = { generateOptions: jest.fn() };
+    realtimeGateway = { emitFreightQuoteUpdated: jest.fn() };
 
     runWithTenantContextSpy = jest
       .spyOn(tenantContext, "runWithTenantContext")
@@ -50,6 +55,7 @@ describe("FreightQuoteCalculationProcessor", () => {
     processor = new FreightQuoteCalculationProcessor(
       prisma as unknown as TenantScopedPrismaClient,
       freightCalculationService as unknown as FreightCalculationService,
+      realtimeGateway as unknown as RealtimeGateway,
     );
   });
 
@@ -59,7 +65,7 @@ describe("FreightQuoteCalculationProcessor", () => {
   });
 
   describe("process", () => {
-    it("reconstrói o contexto de tenant, marca PROCESSING e calcula as opções", async () => {
+    it("reconstrói o contexto de tenant, marca PROCESSING, calcula as opções e notifica via WebSocket", async () => {
       const job = { data: jobData } as Job<FreightQuoteJobData>;
 
       await processor.process(job);
@@ -68,7 +74,7 @@ describe("FreightQuoteCalculationProcessor", () => {
         { tenantId: "tenant-1", userId: "user-1", role: UserRole.MEMBER },
         expect.any(Function),
       );
-      expect(prisma.freightQuote.findFirstOrThrow).toHaveBeenCalledWith({
+      expect(prisma.freightQuote.findFirstOrThrow).toHaveBeenNthCalledWith(1, {
         where: { id: "quote-1" },
       });
       expect(prisma.freightQuote.update).toHaveBeenCalledWith({
@@ -76,13 +82,17 @@ describe("FreightQuoteCalculationProcessor", () => {
         data: { status: FreightQuoteStatus.PROCESSING },
       });
       expect(freightCalculationService.generateOptions).toHaveBeenCalledWith(
-        baseQuote,
+        quoteWithOptions,
+      );
+      expect(realtimeGateway.emitFreightQuoteUpdated).toHaveBeenCalledWith(
+        "tenant-1",
+        quoteWithOptions,
       );
     });
   });
 
   describe("onFailed", () => {
-    it("marca a cotação como ERROR quando o job falha definitivamente", async () => {
+    it("marca a cotação como ERROR e notifica via WebSocket quando o job falha definitivamente", async () => {
       const job = {
         id: "job-1",
         data: jobData,
@@ -99,6 +109,10 @@ describe("FreightQuoteCalculationProcessor", () => {
         where: { id: "quote-1" },
         data: { status: FreightQuoteStatus.ERROR },
       });
+      expect(realtimeGateway.emitFreightQuoteUpdated).toHaveBeenCalledWith(
+        "tenant-1",
+        quoteWithOptions,
+      );
     });
 
     it("não faz nada quando o job é undefined", async () => {
@@ -106,6 +120,7 @@ describe("FreightQuoteCalculationProcessor", () => {
 
       expect(runWithTenantContextSpy).not.toHaveBeenCalled();
       expect(prisma.freightQuote.update).not.toHaveBeenCalled();
+      expect(realtimeGateway.emitFreightQuoteUpdated).not.toHaveBeenCalled();
     });
   });
 });

@@ -23,7 +23,7 @@ import {
   FreightQuoteJobData,
 } from "./freight-quote-queue.constants";
 
-const QUOTE_WITH_OPTIONS_INCLUDE = {
+export const QUOTE_WITH_OPTIONS_INCLUDE = {
   options: {
     include: { carrier: { select: { id: true, name: true } } },
   },
