@@ -73,10 +73,16 @@ Legenda: `[x]` feito · `[ ]` pendente
 - [x] Webhooks de entrada (recebimento de eventos externos) — `POST /webhooks/carriers/:tenantSlug`, autenticado por assinatura HMAC (`Tenant.webhookSecret`), ver ADR-010
 
 ## 8. Upload de arquivos
-- [ ] Estratégia de storage (S3-compatible / local em dev)
-- [ ] Endpoint de upload com validação de tipo/tamanho
-- [ ] Geração de URLs assinadas para download
-- [ ] Vínculo de arquivos a entidades de domínio (ex.: comprovantes, NF-e)
+- [x] Estratégia de storage (S3-compatible / local em dev) — MinIO via
+      docker-compose em dev, `StorageService` sobre `@aws-sdk/client-s3`
+      (troca para AWS S3 real só por configuração, ver ADR-011)
+- [x] Endpoint de upload com validação de tipo/tamanho — `POST /attachments`
+      (whitelist de mimetype, limite de 10MB)
+- [x] Geração de URLs assinadas para download — `GET /attachments/:id/download-url`
+      (presigned URL, 5 min de expiração, testado ponta a ponta)
+- [x] Vínculo de arquivos a entidades de domínio (ex.: comprovantes, NF-e) —
+      modelo `Attachment` polimórfico (`entityType` + `entityId`, cobre
+      Carrier/Client/FreightQuote)
 
 ## 9. Fila assíncrona
 - [x] Setup BullMQ + Redis (`@nestjs/bullmq`, `REDIS_HOST`/`REDIS_PORT`, ver ADR-006)

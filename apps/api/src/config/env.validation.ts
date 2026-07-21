@@ -1,5 +1,6 @@
-import { plainToInstance } from "class-transformer";
+import { plainToInstance, Transform } from "class-transformer";
 import {
+  IsBoolean,
   IsEnum,
   IsInt,
   IsOptional,
@@ -53,6 +54,31 @@ class EnvironmentVariables {
   @Min(1)
   @IsOptional()
   REDIS_PORT: number = 6379;
+
+  @IsString()
+  @IsOptional()
+  S3_ENDPOINT: string = "http://localhost:9000";
+
+  @IsString()
+  @IsOptional()
+  S3_REGION: string = "us-east-1";
+
+  @IsString()
+  @IsOptional()
+  S3_BUCKET: string = "logisense-uploads";
+
+  @IsString()
+  @IsOptional()
+  S3_ACCESS_KEY_ID: string = "logisense";
+
+  @IsString()
+  @IsOptional()
+  S3_SECRET_ACCESS_KEY: string = "logisense123";
+
+  @IsBoolean()
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === "true")
+  S3_FORCE_PATH_STYLE: boolean = true;
 }
 
 export function validate(config: Record<string, unknown>) {

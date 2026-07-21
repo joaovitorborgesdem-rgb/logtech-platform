@@ -17,6 +17,7 @@ const TENANT_SCOPED_MODELS = new Set<Prisma.ModelName>([
   "FreightQuote",
   "AuditLog",
   "DailyMetricsSnapshot",
+  "Attachment",
 ]);
 
 const FILTERED_OPERATIONS = new Set([

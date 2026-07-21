@@ -3,6 +3,7 @@ import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
+import { AttachmentsModule } from "./attachments/attachments.module";
 import { AuthModule } from "./auth/auth.module";
 import { CarriersModule } from "./carriers/carriers.module";
 import { ClientsModule } from "./clients/clients.module";
@@ -16,6 +17,7 @@ import { IntegrationsCommonModule } from "./integrations/common/integrations-com
 import { ViaCepModule } from "./integrations/viacep/viacep.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { RedisModule } from "./redis/redis.module";
+import { StorageModule } from "./storage/storage.module";
 import { TenantMiddleware } from "./tenant/tenant.middleware";
 import { TenantModule } from "./tenant/tenant.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
@@ -38,6 +40,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     PrismaModule,
     RedisModule,
     IntegrationsCommonModule,
+    StorageModule,
     HealthModule,
     AuthModule,
     TenantModule,
@@ -49,6 +52,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     DashboardModule,
     InsightsModule,
     WebhooksModule,
+    AttachmentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

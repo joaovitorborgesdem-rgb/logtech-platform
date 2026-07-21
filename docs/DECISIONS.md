@@ -593,3 +593,78 @@ processo nem é compartilhado entre réplicas (ver acima). Tenants criados
 antes desta migração têm `webhookSecret = null` e não conseguem receber
 webhooks até que um fluxo de rotação/geração de segredo seja adicionado (hoje
 só existe geração no registro).
+
+---
+
+## ADR-011: Upload de arquivos — storage S3-compatible, upload validado e URLs assinadas
+
+**Status:** Aceito
+
+### Contexto
+
+A Fase 8 exige uma estratégia de storage de arquivos (comprovantes, NF-e
+etc. vinculados a entidades de domínio), com validação de tipo/tamanho no
+upload e URLs assinadas para download — sem expor o storage diretamente nem
+proxiar o download pela API.
+
+### Decisão
+
+- **Storage S3-compatible em qualquer ambiente**: `StorageService`
+  (`apps/api/src/storage/`, `@aws-sdk/client-s3` +
+  `@aws-sdk/s3-request-presigner`) fala com qualquer storage compatível com a
+  API do S3 via `S3_ENDPOINT`/`S3_REGION`/`S3_BUCKET`/credenciais/
+  `S3_FORCE_PATH_STYLE`. Em dev, `docker-compose` sobe um **MinIO** local
+  (`logistics_minio`, bucket `logisense-uploads` criado manualmente via `mc`
+  — não há automação de bootstrap do bucket ainda, ver limitação conhecida).
+  Em produção, trocar para AWS S3 real é só configuração (endpoint da AWS,
+  credenciais IAM, `S3_FORCE_PATH_STYLE=false`), sem mudança de código.
+- **Modelo `Attachment`** (tenant-scoped, ver ADR-002): vínculo polimórfico
+  simples via `entityType` (enum `CARRIER | CLIENT | FREIGHT_QUOTE`) +
+  `entityId` — cobre "comprovantes, NF-e" vinculados a qualquer uma dessas
+  três entidades sem precisar de uma tabela de junção por entidade.
+  `AttachmentsService.create` valida que a entidade referenciada existe (e
+  pertence ao tenant atual, via `TENANT_SCOPED_PRISMA`) antes de aceitar o
+  upload — um `entityId` de outro tenant ou inexistente é rejeitado com 404.
+- **Validação de upload**: whitelist de mimetype (`application/pdf`,
+  `image/jpeg`, `image/png` — o suficiente para comprovantes/NF-e) e tamanho
+  máximo de 10MB, validados no código (não apenas no `fileFilter` do multer,
+  para mensagens de erro consistentes com o resto da API). `FileInterceptor`
+  usa memory storage (sem `dest`/`storage` configurado — o padrão do multer
+  quando nenhum dos dois é passado), então o arquivo nunca toca o disco local
+  da API, só existe em memória entre o upload e o `PutObjectCommand`.
+- **Chave de storage** inclui o `tenantId` no path
+  (`{tenantId}/{entityType}/{entityId}/{uuid}-{nome-sanitizado}`) — isolamento
+  por tenant também no nível do object storage, não só na linha do banco.
+- **URLs assinadas para download**: `GET /attachments/:id/download-url`
+  retorna uma presigned URL (`GetObjectCommand` + `getSignedUrl`, expiração de
+  5 minutos) — o cliente baixa direto do S3/MinIO, a API nunca faz proxy do
+  arquivo. Testado ponta a ponta: a URL assinada funciona sem qualquer header
+  de autenticação da nossa API (é o próprio storage validando a assinatura).
+- **Remoção**: segue o padrão de soft delete + auditoria já usado em
+  Carrier/Client/FreightQuote (ADR-003) — a linha de `Attachment` é marcada
+  `deletedAt`, um `AuditLog` (`ATTACHMENT_DELETED`) é criado, **e o objeto é
+  fisicamente apagado do storage** (diferente do padrão de soft delete do
+  banco: manter bytes órfãos no S3 indefinidamente não tem o mesmo valor de
+  trilha de auditoria que manter a linha do banco, e tem custo de storage
+  real).
+
+### Rejeitado
+
+- Servir o arquivo via proxy da API (`GET /attachments/:id/file` lendo do S3
+  e retransmitindo) foi rejeitado — URLs assinadas são o padrão correto para
+  isso: menos carga na API, suporta range requests/CDN nativamente no
+  storage real, e é exatamente o que "geração de URLs assinadas" pede.
+- Fileiras dedicadas por entidade (`CarrierAttachment`, `ClientAttachment`,
+  `FreightQuoteAttachment`) foram rejeitadas em favor do modelo polimórfico
+  único — menos tabelas, mesma capacidade, e a validação de existência da
+  entidade já cobre a integridade que teria vindo de uma FK dedicada.
+
+### Limitação conhecida
+
+Criação do bucket no MinIO é manual (`mc mb`) — não há Terraform/script de
+bootstrap nem checagem de existência do bucket na inicialização da API; um
+ambiente novo precisa criar o bucket manualmente antes do primeiro upload.
+Sem geração de URL assinada para **upload** direto (PUT presignado) — todo
+upload passa pela API hoje, o que é aceitável para o tamanho de arquivo
+esperado (10MB) mas não escalaria para uploads grandes sem repensar esse
+fluxo.
