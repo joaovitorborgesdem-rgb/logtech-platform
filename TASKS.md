@@ -70,10 +70,14 @@ Legenda: `[x]` feito · `[ ]` pendente
 - [ ] Vínculo de arquivos a entidades de domínio (ex.: comprovantes, NF-e)
 
 ## 9. Fila assíncrona
-- [ ] Setup BullMQ + Redis
-- [ ] Definição dos jobs (ex.: envio de e-mail, cálculo de insights, notificações)
+- [x] Setup BullMQ + Redis (`@nestjs/bullmq`, `REDIS_HOST`/`REDIS_PORT`, ver ADR-006)
+- [x] Definição dos jobs — `freight-quote-calculation` processa o cálculo de
+      frete (Fase 4) em background: `PENDING` -> `PROCESSING` -> `DONE`/`ERROR`
+      (`FreightQuoteCalculationProcessor`)
 - [ ] Dashboard/monitoramento de filas (ex.: Bull Board)
-- [ ] Estratégia de retry e dead-letter
+- [ ] Estratégia de retry e dead-letter — decidido não usar retry automático
+      nesta fase por falta de idempotência em `generateOptions` (ver
+      limitação conhecida na ADR-006)
 
 ## 10. Realtime
 - [ ] Setup WebSocket Gateway (NestJS + Socket.IO)

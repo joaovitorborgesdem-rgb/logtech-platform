@@ -1,7 +1,11 @@
-import { NotFoundException } from "@nestjs/common";
-import { AuditAction, FreightQuoteStatus } from "@prisma/client";
+import {
+  InternalServerErrorException,
+  NotFoundException,
+} from "@nestjs/common";
+import { AuditAction, FreightQuoteStatus, UserRole } from "@prisma/client";
+import { Queue } from "bullmq";
 import { TenantScopedPrismaClient } from "../prisma/tenant-scoped-prisma.provider";
-import { FreightCalculationService } from "./freight-calculation.service";
+import * as tenantContext from "../tenant/tenant-context";
 import { FreightQuotesService } from "./freight-quotes.service";
 
 describe("FreightQuotesService", () => {
@@ -16,7 +20,8 @@ describe("FreightQuotesService", () => {
     };
     auditLog: { create: jest.Mock };
   };
-  let freightCalculationService: { generateOptions: jest.Mock };
+  let freightQuoteQueue: { add: jest.Mock };
+  let getTenantContextSpy: jest.SpyInstance;
 
   const baseQuote = {
     id: "quote-1",
@@ -29,7 +34,7 @@ describe("FreightQuotesService", () => {
     widthCm: 30,
     heightCm: 20,
     cargoValue: 500,
-    status: FreightQuoteStatus.PROCESSING,
+    status: FreightQuoteStatus.PENDING,
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
@@ -48,26 +53,31 @@ describe("FreightQuotesService", () => {
       },
       auditLog: { create: jest.fn() },
     };
-    freightCalculationService = { generateOptions: jest.fn() };
+    freightQuoteQueue = { add: jest.fn() };
+
+    getTenantContextSpy = jest
+      .spyOn(tenantContext, "getTenantContext")
+      .mockReturnValue({
+        tenantId: "tenant-1",
+        userId: "user-1",
+        role: UserRole.MEMBER,
+      });
 
     service = new FreightQuotesService(
       prisma as unknown as TenantScopedPrismaClient,
-      freightCalculationService as unknown as FreightCalculationService,
+      freightQuoteQueue as unknown as Queue,
     );
   });
 
   afterEach(() => {
     jest.clearAllMocks();
+    getTenantContextSpy.mockRestore();
   });
 
   describe("create", () => {
-    it("cria uma cotação de frete vinculada ao usuário atual e calcula as opções", async () => {
+    it("cria a cotação como PENDING e enfileira o cálculo de opções", async () => {
       prisma.freightQuote.create.mockResolvedValue(baseQuote);
-      freightCalculationService.generateOptions.mockResolvedValue(undefined);
-      prisma.freightQuote.findFirst.mockResolvedValue({
-        ...baseQuoteWithOptions,
-        status: FreightQuoteStatus.DONE,
-      });
+      prisma.freightQuote.findFirst.mockResolvedValue(baseQuoteWithOptions);
 
       const result = await service.create(
         {
@@ -82,49 +92,43 @@ describe("FreightQuotesService", () => {
         "user-1",
       );
 
-      expect(result.status).toBe(FreightQuoteStatus.DONE);
+      expect(result).toEqual(baseQuoteWithOptions);
       const [createCall] = prisma.freightQuote.create.mock.calls as Array<
-        [{ data: { userId: string; status: FreightQuoteStatus } }]
+        [{ data: { userId: string } }]
       >;
       expect(createCall[0].data.userId).toBe("user-1");
-      expect(createCall[0].data.status).toBe(FreightQuoteStatus.PROCESSING);
-      expect(freightCalculationService.generateOptions).toHaveBeenCalledWith(
-        baseQuote,
+
+      expect(freightQuoteQueue.add).toHaveBeenCalledWith(
+        "calculate-options",
+        {
+          quoteId: "quote-1",
+          tenantId: "tenant-1",
+          userId: "user-1",
+          role: UserRole.MEMBER,
+        },
+        { attempts: 1 },
       );
     });
 
-    it("marca a cotação como ERROR quando o cálculo falha", async () => {
+    it("lança InternalServerErrorException quando não há contexto de tenant", async () => {
       prisma.freightQuote.create.mockResolvedValue(baseQuote);
-      freightCalculationService.generateOptions.mockRejectedValue(
-        new Error("falha no cálculo"),
-      );
-      prisma.freightQuote.update.mockResolvedValue({
-        ...baseQuote,
-        status: FreightQuoteStatus.ERROR,
-      });
-      prisma.freightQuote.findFirst.mockResolvedValue({
-        ...baseQuoteWithOptions,
-        status: FreightQuoteStatus.ERROR,
-      });
+      getTenantContextSpy.mockReturnValue(undefined);
 
-      const result = await service.create(
-        {
-          originZipCode: "01310-100",
-          destinationZipCode: "20040-020",
-          weightKg: 12.5,
-          lengthCm: 40,
-          widthCm: 30,
-          heightCm: 20,
-          cargoValue: 500,
-        },
-        "user-1",
-      );
-
-      expect(result.status).toBe(FreightQuoteStatus.ERROR);
-      expect(prisma.freightQuote.update).toHaveBeenCalledWith({
-        where: { id: "quote-1" },
-        data: { status: FreightQuoteStatus.ERROR },
-      });
+      await expect(
+        service.create(
+          {
+            originZipCode: "01310-100",
+            destinationZipCode: "20040-020",
+            weightKg: 12.5,
+            lengthCm: 40,
+            widthCm: 30,
+            heightCm: 20,
+            cargoValue: 500,
+          },
+          "user-1",
+        ),
+      ).rejects.toBeInstanceOf(InternalServerErrorException);
+      expect(freightQuoteQueue.add).not.toHaveBeenCalled();
     });
   });
 

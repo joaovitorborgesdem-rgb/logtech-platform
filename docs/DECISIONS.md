@@ -246,3 +246,56 @@ a implementação de `estimateDistanceKm` sem alterar o restante do fluxo.
 A Fase 4 processa o cálculo de forma síncrona dentro da requisição HTTP de
 criação (`POST /freight-quotes`). A Fase 9 (BullMQ) move esse processamento
 para um worker assíncrono — ver ADR-006.
+
+---
+
+## ADR-006: Fila assíncrona para o cálculo de frete (BullMQ + Redis)
+
+**Status:** Aceito
+
+### Contexto
+
+A Fase 9 exige que o cálculo de frete (Fase 4, ADR-005) deixe de bloquear a
+requisição HTTP e passe a ser processado em background, usando o Redis já
+disponível no docker-compose de dev.
+
+### Decisão
+
+- Fila `freight-quote-calculation` (`@nestjs/bullmq` + `bullmq`, conexão Redis
+  via `REDIS_HOST`/`REDIS_PORT`, novas variáveis de ambiente com default
+  `localhost:6379`). `BullModule.forRootAsync` registrado uma vez em
+  `AppModule` (conexão compartilhada); `BullModule.registerQueue` dentro de
+  `FreightQuotesModule`, que também é dono do worker
+  (`FreightQuoteCalculationProcessor`) — produtor e consumidor vivem no mesmo
+  módulo por serem uma única responsabilidade de domínio.
+- `FreightQuotesService.create` agora só cria o `FreightQuote` (status
+  `PENDING`, default do schema) e enfileira um job (`calculate-options`) com
+  `{ quoteId, tenantId, userId, role }`, retornando imediatamente.
+- `FreightQuoteCalculationProcessor.process` roda fora do ciclo de vida HTTP,
+  então **reconstrói manualmente o contexto de tenant** (`runWithTenantContext`,
+  ver ADR-002) a partir dos campos do job antes de tocar em
+  `TENANT_SCOPED_PRISMA` — sem isso, a extension de escopo por tenant não
+  filtraria as queries (cai no branch "sem contexto, sem filtro"). Dentro do
+  contexto: marca a cotação como `PROCESSING`, busca a cotação por id (agora
+  filtrada por `tenantId` automaticamente) e delega a `FreightCalculationService.generateOptions`
+  (reaproveitada sem alterações da Fase 4).
+- **`attempts: 1` (sem retry automático)**: `generateOptions` não é
+  idempotente — ela sempre insere novas `FreightQuoteOption`, então reprocessar
+  o mesmo job duplicaria as opções. Falhas viram `ERROR` direto via o listener
+  `@OnWorkerEvent("failed")`, que também reconstrói o contexto de tenant a
+  partir do payload do job para atualizar o status da cotação certa.
+
+### Rejeitado
+
+Retry com backoff foi rejeitado nesta fase pelo motivo de idempotência acima.
+Se retries se tornarem necessários (ex.: falha transitória de conexão com o
+banco), a solução correta é tornar `generateOptions` idempotente (upsert por
+`quoteId + carrierId`, ou apagar opções existentes antes de recriar) antes de
+habilitar `attempts > 1`.
+
+### Limitação conhecida
+
+Sem Bull Board ou dashboard de monitoramento de filas nesta fase (item restante
+do roadmap da Fase 9). Sem dead-letter queue explícita — jobs que falham
+definitivamente ficam no estado `failed` do Redis (visível via Redis CLI/
+Bull Board futuro), mas a cotação já reflete `ERROR` para o usuário via a API.

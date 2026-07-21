@@ -44,6 +44,15 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   JWT_REFRESH_EXPIRES_IN: string = "7d";
+
+  @IsString()
+  @IsOptional()
+  REDIS_HOST: string = "localhost";
+
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  REDIS_PORT: number = 6379;
 }
 
 export function validate(config: Record<string, unknown>) {

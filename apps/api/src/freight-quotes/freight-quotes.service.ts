@@ -1,20 +1,27 @@
-import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { InjectQueue } from "@nestjs/bullmq";
 import {
-  AuditAction,
-  FreightQuote,
-  FreightQuoteStatus,
-  Prisma,
-} from "@prisma/client";
+  Inject,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from "@nestjs/common";
+import { AuditAction, FreightQuote, Prisma } from "@prisma/client";
+import { Queue } from "bullmq";
 import { PaginatedResult } from "../common/interfaces/paginated-result.interface";
 import { buildPaginatedResult } from "../common/pagination.util";
 import {
   TENANT_SCOPED_PRISMA,
   TenantScopedPrismaClient,
 } from "../prisma/tenant-scoped-prisma.provider";
+import { getTenantContext } from "../tenant/tenant-context";
 import { CreateFreightQuoteDto } from "./dto/create-freight-quote.dto";
 import { FreightQuoteQueryDto } from "./dto/freight-quote-query.dto";
 import { UpdateFreightQuoteDto } from "./dto/update-freight-quote.dto";
-import { FreightCalculationService } from "./freight-calculation.service";
+import {
+  FREIGHT_QUOTE_CALCULATION_JOB,
+  FREIGHT_QUOTE_QUEUE,
+  FreightQuoteJobData,
+} from "./freight-quote-queue.constants";
 
 const QUOTE_WITH_OPTIONS_INCLUDE = {
   options: {
@@ -28,12 +35,11 @@ export type FreightQuoteWithOptions = Prisma.FreightQuoteGetPayload<{
 
 @Injectable()
 export class FreightQuotesService {
-  private readonly logger = new Logger(FreightQuotesService.name);
-
   constructor(
     @Inject(TENANT_SCOPED_PRISMA)
     private readonly prisma: TenantScopedPrismaClient,
-    private readonly freightCalculationService: FreightCalculationService,
+    @InjectQueue(FREIGHT_QUOTE_QUEUE)
+    private readonly freightQuoteQueue: Queue<FreightQuoteJobData>,
   ) {}
 
   async create(
@@ -44,22 +50,26 @@ export class FreightQuotesService {
       data: {
         ...dto,
         userId,
-        status: FreightQuoteStatus.PROCESSING,
       } as unknown as Prisma.FreightQuoteUncheckedCreateInput,
     });
 
-    try {
-      await this.freightCalculationService.generateOptions(quote);
-    } catch (error) {
-      this.logger.error(
-        `Falha ao calcular opções de frete para a cotação ${quote.id}`,
-        error as Error,
+    const tenantContext = getTenantContext();
+    if (!tenantContext) {
+      throw new InternalServerErrorException(
+        "Contexto de tenant ausente ao enfileirar cálculo de frete",
       );
-      await this.prisma.freightQuote.update({
-        where: { id: quote.id },
-        data: { status: FreightQuoteStatus.ERROR },
-      });
     }
+
+    await this.freightQuoteQueue.add(
+      FREIGHT_QUOTE_CALCULATION_JOB,
+      {
+        quoteId: quote.id,
+        tenantId: tenantContext.tenantId,
+        userId: tenantContext.userId,
+        role: tenantContext.role,
+      },
+      { attempts: 1 },
+    );
 
     return this.findOne(quote.id);
   }
