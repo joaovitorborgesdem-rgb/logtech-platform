@@ -133,11 +133,22 @@ Legenda: `[x]` feito · `[ ]` pendente
       `HighLatencyP95` (p95 > 1s em 5m)
 
 ## 13. Testes
-- [ ] Testes unitários (services, use cases)
-- [ ] Testes de integração (controllers + Prisma via DB de teste)
-- [ ] Testes e2e (fluxos críticos: auth, multi-tenancy, frete)
-- [ ] Testes de frontend (componentes + fluxos principais)
-- [ ] Cobertura mínima definida em CI
+- [x] Testes unitários (services, use cases) — já cobertos desde as fases
+      anteriores (160+ specs em `apps/api/src/**/*.spec.ts`, mocks de Prisma)
+- [x] Testes de integração (controllers + Prisma via DB de teste) —
+      `apps/api/test/integration/*.integration-spec.ts` (Carriers, Clients:
+      CRUD via supertest contra `logisense_test_db` real, incluindo
+      isolamento entre tenants)
+- [x] Testes e2e (fluxos críticos: auth, multi-tenancy, frete) —
+      `apps/api/test/e2e/*.e2e-spec.ts` (`auth`: register→login→rota
+      protegida→refresh→logout; `multi-tenancy`: isolamento cross-tenant via
+      TenantContextInterceptor+TENANT_SCOPED_PRISMA; `freight-quotes`: fila
+      BullMQ + worker reais, sem mocks)
+- [x] Testes de frontend (componentes + fluxos principais) — Vitest +
+      Testing Library em `apps/web` (`api-client`, `units`, `auth-context`,
+      `CepSearch`, página de login)
+- [x] Cobertura mínima definida em CI — 70% (`branches`/`functions`/`lines`/
+      `statements`) no `apps/api`, `.github/workflows/ci.yml`
 
 ## 14. Landing page
 - [ ] Estrutura de marketing (Next.js, rota pública separada da app autenticada)

@@ -825,3 +825,136 @@ ativamente — precisam ser observados manualmente em
 `http://localhost:9090/alerts`. Tracing também não tem um collector real
 configurado por padrão (só console em dev); falta uma stack tipo Jaeger ou
 Tempo para inspecionar spans exportados via OTLP.
+
+## ADR-014: Estratégia de testes — integração/e2e contra banco real, Vitest no frontend, cobertura no CI
+
+**Status:** Aceito
+
+### Contexto
+
+Até a Fase 12, `apps/api` já tinha uma suíte de testes unitários robusta
+(160+ specs), mas 100% baseada em mocks de Prisma — nenhum teste exercitava
+a stack HTTP completa contra um banco real, e em particular não havia
+nenhuma verificação de que `TENANT_SCOPED_PRISMA` (ADR-002/005) realmente
+impede um tenant de ver dados de outro fora de testes unitários isolados do
+extension em si. `apps/web` não tinha nenhum framework de teste. Não havia
+CI. A Fase 13 pede as 5 coisas.
+
+### Banco de teste dedicado (não testcontainers)
+
+`logisense_test_db` foi criado no mesmo container `logistics_mysql` já
+usado para dev (`docker/mysql-init/01-create-test-db.sql`, montado em
+`docker-entrypoint-initdb.d` para volumes novos; criado manualmente uma vez
+no volume já existente). Preferido a testcontainers para não adicionar uma
+dependência nova nem pagar o custo de subir um container por run — o
+trade-off aceito é que os testes de integração/e2e exigem os containers
+Docker já rodando localmente (mesma premissa de `pnpm dev`).
+
+`apps/api/scripts/prepare-test-db.ts` roda antes de `test:integration`/
+`test:e2e` (`pnpm exec prisma migrate deploy` — não precisa de shadow
+database, diferente de `migrate dev`) e é o único lugar que sabe como
+apontar para o banco de teste: `apps/api/test/support/load-test-env.ts`
+carrega `.env.test.local` (gitignored via `.env.*.local`, com
+`.env.test.example` committed como template) **antes** de qualquer import
+do `AppModule` — como `PrismaService` lê `process.env.DATABASE_URL`
+diretamente no construtor (Fase 0, não via `ConfigService`), e dotenv não
+sobrescreve uma env var já setada, isso garante que o `ConfigModule.forRoot`
+(que carrega `.env` de dev) nunca pisa no valor de teste já carregado.
+
+### Redis isolado por `REDIS_DB` (lição aprendida durante a implementação)
+
+Primeira versão dos testes e2e de frete apontava para o mesmo Redis (db 0)
+usado pelo `pnpm dev` local. Rodar a suíte várias vezes no mesmo dia deixou
+dezenas de jobs BullMQ órfãos acumulados na fila `freight-quote-calculation`
+(referenciando `FreightQuote`s que o `resetDatabase()` de um run seguinte já
+tinha apagado) — o worker processava esses jobs órfãos primeiro, e o job do
+teste atual só era pego depois do timeout de 15s do polling. Corrigido
+adicionando `REDIS_DB` (opcional, default `0`) em `env.validation.ts`,
+`RedisService` e `BullModule.forRootAsync` (`app.module.ts`); `.env.test.*`
+usa `REDIS_DB=1`, isolado do Redis de dev. `prepare-test-db.ts` também dá um
+`FLUSHDB` nesse db isolado antes de cada run, para começar sempre limpo.
+
+### `resetDatabase`: `DELETE FROM`, não `TRUNCATE`
+
+`apps/api/test/support/reset-database.ts` limpa todas as tabelas (nomes =
+nomes dos models, sem `@@map` no schema) num `beforeEach` de cada spec de
+integração/e2e, com `SET FOREIGN_KEY_CHECKS=0` para não precisar respeitar
+ordem de dependência — dentro de um `$transaction` de callback único, porque
+`SET FOREIGN_KEY_CHECKS` é uma variável de sessão e, sem fixar uma única
+conexão do pool do driver adapter para toda a operação, cada
+`$executeRawUnsafe` pode cair numa conexão diferente e o flag não vale para
+o delete seguinte (erro observado: `Cannot truncate a table referenced in a
+foreign key constraint`). A primeira versão usava `TRUNCATE TABLE`, que
+neste MySQL local levava ~1.4s por tabela (DDL, commit implícito) — 10
+tabelas estourava o timeout da transação interativa. Trocado por
+`DELETE FROM` nas mesmas tabelas: ~0.2s no total, sem nenhuma mudança de
+comportamento relevante (nenhuma tabela usa auto-increment; os IDs são
+`cuid()`).
+
+### Bootstrap de teste precisa de `enableShutdownHooks()`
+
+`apps/api/test/support/test-app.ts` (`createTestApp()`) espelha o
+`main.ts`: mesmo `ValidationPipe`, e crucialmente `app.enableShutdownHooks()`
+antes de `app.init()` — sem isso, `app.close()` não dispara
+`onApplicationShutdown` nos providers, as conexões BullMQ/ioredis ficam
+abertas, e o processo do Jest nunca termina sozinho no fim da suíte (só
+detectado porque o comando ficou "pendurado" com CPU zero por horas até ser
+morto manualmente). `--forceExit` nos scripts `test:integration`/`test:e2e`
+é uma rede de segurança adicional, não o fix principal.
+
+### Corte integração vs. e2e
+
+Testes de **integração** (`test/integration/`) cobrem CRUD + validação +
+isolamento de tenant por módulo (Carriers, Clients) — um por recurso.
+Testes de **e2e** (`test/e2e/`) cobrem jornadas que atravessam mais de uma
+requisição/módulo: `auth` (register→login→rota protegida→refresh→logout),
+`multi-tenancy` (isolamento através de múltiplos recursos na mesma jornada)
+e `freight-quotes` (fila BullMQ + worker reais, sem nenhum mock — o único
+teste que não usa `TENANT_SCOPED_PRISMA` só via HTTP síncrono).
+
+### Frontend: Vitest + Testing Library
+
+Seguido o guia oficial do Next 16
+(`node_modules/next/dist/docs/01-app/02-guides/testing/vitest.md`):
+`vite-tsconfig-paths` em vez de alias manual no `vitest.config.ts`, para
+respeitar o `@/*` do `tsconfig.json` sem duplicar configuração.
+`@testing-library/react` não faz cleanup automático entre testes no Vitest
+sem `test.globals: true` (que não usamos) — `vitest.setup.ts` registra
+`afterEach(() => cleanup())` manualmente; sem isso, o segundo teste de um
+mesmo arquivo via múltiplos `render()` falha com "multiple elements found"
+por acúmulo de DOM entre testes. `apps/web/src/app/login/page.tsx` ganhou
+`htmlFor`/`id` nos pares label/input (não existiam) — mudança mínima que
+também é uma correção de acessibilidade genuína, feita para permitir
+`getByLabelText` nos testes em vez de queries frágeis por placeholder.
+
+### Cobertura mínima no CI
+
+70% (`branches`/`functions`/`lines`/`statements`) só no `apps/api`, via
+`coverageThreshold` no bloco `"jest"` do `package.json`, com
+`collectCoverageFrom` excluindo `*.module.ts`, `*.dto.ts`, `*.constants.ts`
+e `main.ts` — wiring puro que não agrega sinal ao forçar teste. `apps/web`
+roda cobertura no CI só para reporte, sem threshold que quebre o build
+(decisão explícita do usuário, revisitar quando o time crescer).
+`.github/workflows/ci.yml`: um job único com serviços `mysql:8.0` e
+`redis:7-alpine`, rodando lint → unit+coverage → integration → e2e →
+frontend → build, nessa ordem (falha rápido primeiro).
+
+### Rejeitado
+
+- Testcontainers para o banco de teste — dependência nova + custo de subir
+  container por run, sem necessidade dado que o Docker Compose do projeto já
+  é uma premissa de ambiente local.
+- `TRUNCATE` para reset de banco entre testes — DDL lento neste ambiente;
+  `DELETE FROM` dentro de uma transação com FK checks desligados resolve sem
+  esse custo.
+- Cobertura mínima também no `apps/web` — adiado por decisão do usuário.
+
+### Limitação conhecida
+
+Os testes de integração/e2e exigem os containers Docker locais (ou os
+serviços equivalentes no CI) rodando — não há fallback in-memory. O reset
+de banco (`resetDatabase`) e o flush de Redis (`REDIS_DB` isolado) cobrem
+o essencial, mas não há paralelização real entre arquivos de teste
+(`--runInBand`): a suíte de integração/e2e é sequencial por design, o que é
+aceitável no tamanho atual mas pode precisar de revisão se o número de specs
+crescer muito.

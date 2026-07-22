@@ -55,6 +55,11 @@ class EnvironmentVariables {
   @IsOptional()
   REDIS_PORT: number = 6379;
 
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  REDIS_DB: number = 0;
+
   @IsString()
   @IsOptional()
   S3_ENDPOINT: string = "http://localhost:9000";

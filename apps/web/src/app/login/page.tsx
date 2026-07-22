@@ -41,10 +41,14 @@ export default function LoginPage() {
           Entrar no LogiSense
         </h1>
 
-        <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+        <label
+          htmlFor="tenantSlug"
+          className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+        >
           Identificador do tenant
         </label>
         <input
+          id="tenantSlug"
           type="text"
           required
           value={tenantSlug}
@@ -53,10 +57,14 @@ export default function LoginPage() {
           className="mb-4 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         />
 
-        <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+        <label
+          htmlFor="email"
+          className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+        >
           E-mail
         </label>
         <input
+          id="email"
           type="email"
           required
           value={email}
@@ -64,10 +72,14 @@ export default function LoginPage() {
           className="mb-4 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         />
 
-        <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+        <label
+          htmlFor="password"
+          className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+        >
           Senha
         </label>
         <input
+          id="password"
           type="password"
           required
           value={password}
