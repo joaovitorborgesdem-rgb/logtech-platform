@@ -1,13 +1,20 @@
+import "./observability/tracing";
 import "reflect-metadata";
 import { ValidationPipe } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
 import compression from "compression";
 import helmet from "helmet";
+import { Logger } from "nestjs-pino";
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create(AppModule, {
+    rawBody: true,
+    bufferLogs: true,
+  });
+  app.useLogger(app.get(Logger));
+
   const config = app.get(ConfigService);
 
   app.use(helmet());

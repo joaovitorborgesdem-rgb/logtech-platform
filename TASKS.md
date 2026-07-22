@@ -116,10 +116,21 @@ Legenda: `[x]` feito · `[ ]` pendente
       (paginado, filtros por action/userId/data, restrito a OWNER/ADMIN)
 
 ## 12. Observabilidade
-- [ ] Logging estruturado (ex.: pino) com correlação de request ID
-- [ ] Health checks detalhados (DB, Redis, filas)
-- [ ] Métricas (Prometheus) e tracing (OpenTelemetry)
-- [ ] Alertas básicos de erro/latência
+- [x] Logging estruturado (ex.: pino) com correlação de request ID —
+      `nestjs-pino` (`LoggingModule`), `genReqId` reaproveita `X-Request-Id`
+      recebido ou gera um novo; devolvido no header de resposta e propagado
+      a todo `Logger` do Nest (ver ADR-013)
+- [x] Health checks detalhados (DB, Redis, filas) — `GET /health`
+      (`@nestjs/terminus`): `database` (`SELECT 1`), `redis` (`ping`),
+      `freight-quote-queue` e `insights-queue` (`getJobCounts`)
+- [x] Métricas (Prometheus) e tracing (OpenTelemetry) — `GET /metrics`
+      (`prom-client`: métricas default do processo + `http_requests_total` /
+      `http_request_duration_seconds` via `MetricsMiddleware`); tracing OTel
+      (`NodeSDK` + auto-instrumentations) exporta para OTLP se
+      `OTEL_EXPORTER_OTLP_ENDPOINT` estiver setada, senão console (dev)
+- [x] Alertas básicos de erro/latência — `docker/prometheus/alerts.yml`:
+      `ApiDown` (scrape falhando), `HighErrorRate` (>5% 5xx em 5m),
+      `HighLatencyP95` (p95 > 1s em 5m)
 
 ## 13. Testes
 - [ ] Testes unitários (services, use cases)

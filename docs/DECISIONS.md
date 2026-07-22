@@ -740,3 +740,88 @@ do método HTTP na própria `description`/`metadata` — não há um campo
 `operation` estruturado. Também não há política de retenção/expurgo de
 `AuditLog` (a tabela cresce indefinidamente); fica para quando isso se tornar
 um problema real de volume.
+
+## ADR-013: Observabilidade — logging estruturado, health checks, métricas/tracing e alertas
+
+**Status:** Aceito
+
+### Contexto
+
+Até a Fase 11 o único sinal operacional era `console.log`/`Logger` do Nest
+sem formato fixo, um `GET /health` raso (sem checar dependências) e nenhuma
+métrica ou tracing. A Fase 12 pede quatro coisas: logging estruturado com
+correlação de request ID, health checks detalhados, métricas Prometheus +
+tracing OpenTelemetry, e alertas básicos.
+
+### Logging estruturado (`LoggingModule`, `nestjs-pino`)
+
+`pino`/`pino-http` via `nestjs-pino` substitui o logger padrão do Nest
+(`app.useLogger(app.get(Logger))` em `main.ts`) — qualquer `new Logger(...)`
+já existente no código passa a emitir JSON estruturado sem precisar tocar
+nesses call sites. `genReqId` reaproveita `X-Request-Id` recebido do
+cliente/proxy ou gera um novo (`randomUUID`), devolvido no header de
+resposta — permite correlacionar logs de uma mesma requisição entre serviços.
+Redação de campos sensíveis (`authorization`, `cookie`, `set-cookie`) via
+`redact`. Em dev, `pino-pretty` (single line, colorido); em produção, JSON
+puro (`NODE_ENV=production`).
+
+### Health checks detalhados (`GET /health`, `@nestjs/terminus`)
+
+`HealthIndicatorsService` expõe quatro indicadores independentes —
+`database` (`SELECT 1` via Prisma), `redis` (`ping`), e as duas filas BullMQ
+já existentes desde a Fase 9/10 (`freight-quote-queue`, `insights-queue`,
+via `getJobCounts`). Cada indicador captura sua própria exceção e reporta
+`down` com a mensagem do erro, em vez de deixar uma dependência fora do ar
+derrubar o healthcheck inteiro sem diagnóstico.
+
+### Métricas (`GET /metrics`, `prom-client`) e tracing (OpenTelemetry)
+
+`MetricsRegistry` mantém um único `Registry` por processo: métricas default
+do Node (`collectDefaultMetrics` — CPU, memória, event loop lag, GC) mais
+`http_requests_total` e `http_request_duration_seconds` (labels `method`,
+`route`, `status_code`), populadas por `MetricsMiddleware`.
+
+- **Middleware, não interceptor**: lê `req.route`/`res.statusCode` dentro do
+  evento `finish` do response, depois que o Express já terminou de rotear e
+  enviar a resposta — garante o status code final real. Um interceptor Nest
+  teria o `tap` de erro rodando antes do exception filter global escrever a
+  resposta, capturando o status errado em caminhos de erro.
+- `GET /metrics` **não tem `JwtAuthGuard`** — é o padrão para scraping do
+  Prometheus, que não carrega JWT de usuário. Em produção, o acesso deve ser
+  restrito por rede (VPC/firewall), não por autenticação de aplicação.
+- Tracing via `@opentelemetry/sdk-node` + `auto-instrumentations-node`
+  (`observability/tracing.ts`), importado como a **primeira linha** de
+  `main.ts` — precisa rodar antes de qualquer módulo instrumentado (http,
+  express, mysql2...) ser carregado. Sem `OTEL_EXPORTER_OTLP_ENDPOINT`
+  configurada, os spans só vão para o console (`ConsoleSpanExporter`) — dá
+  para confirmar que o tracing está funcionando em dev sem subir um
+  collector; em produção, a env var aponta para um collector OTLP real
+  (Jaeger, Tempo, Honeycomb, etc.).
+
+### Alertas básicos (`docker/prometheus/`)
+
+Um container Prometheus novo no `docker-compose.yml` (`host.docker.internal`
+para alcançar a API rodando fora do Docker) faz scrape de `/metrics` a cada
+15s e avalia três regras (`alerts.yml`): `ApiDown` (scrape falhando por mais
+de 1 minuto), `HighErrorRate` (>5% de respostas 5xx em 5 minutos) e
+`HighLatencyP95` (p95 de latência HTTP acima de 1s em 5 minutos). Não há
+Alertmanager configurado — as regras aparecem como firing no Prometheus, mas
+não há roteamento para Slack/PagerDuty/e-mail; isso fica para quando houver
+um canal real de on-call.
+
+### Rejeitado
+
+- Métricas de negócio customizadas (ex.: cotações de frete calculadas por
+  minuto) foram deixadas de fora — a Fase 12 pede a infraestrutura de
+  observabilidade, não métricas de domínio específicas; nada impede
+  registrar novos `Counter`/`Histogram` no mesmo `MetricsRegistry` depois.
+- Interceptor para captura de métricas HTTP foi rejeitado em favor de
+  middleware, pelo motivo de status code descrito acima.
+
+### Limitação conhecida
+
+Sem Alertmanager, os alertas do Prometheus não notificam ninguém
+ativamente — precisam ser observados manualmente em
+`http://localhost:9090/alerts`. Tracing também não tem um collector real
+configurado por padrão (só console em dev); falta uma stack tipo Jaeger ou
+Tempo para inspecionar spans exportados via OTLP.

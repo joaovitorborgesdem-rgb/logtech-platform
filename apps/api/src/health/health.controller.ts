@@ -1,24 +1,22 @@
 import { Controller, Get } from "@nestjs/common";
-import { PrismaService } from "../prisma/prisma.service";
+import { HealthCheck, HealthCheckService } from "@nestjs/terminus";
+import { HealthIndicatorsService } from "./health-indicators.service";
 
 @Controller("health")
 export class HealthController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly health: HealthCheckService,
+    private readonly indicators: HealthIndicatorsService,
+  ) {}
 
   @Get()
-  async check() {
-    let db: "up" | "down" = "up";
-
-    try {
-      await this.prisma.$queryRaw`SELECT 1`;
-    } catch {
-      db = "down";
-    }
-
-    return {
-      status: "ok",
-      db,
-      timestamp: new Date().toISOString(),
-    };
+  @HealthCheck()
+  check() {
+    return this.health.check([
+      () => this.indicators.checkDatabase(),
+      () => this.indicators.checkRedis(),
+      () => this.indicators.checkFreightQuoteQueue(),
+      () => this.indicators.checkInsightsQueue(),
+    ]);
   }
 }

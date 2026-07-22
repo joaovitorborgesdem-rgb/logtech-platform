@@ -16,6 +16,9 @@ import { InsightsModule } from "./insights/insights.module";
 import { CnpjModule } from "./integrations/cnpj/cnpj.module";
 import { IntegrationsCommonModule } from "./integrations/common/integrations-common.module";
 import { ViaCepModule } from "./integrations/viacep/viacep.module";
+import { LoggingModule } from "./observability/logging/logging.module";
+import { MetricsMiddleware } from "./observability/metrics/metrics.middleware";
+import { MetricsModule } from "./observability/metrics/metrics.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { RedisModule } from "./redis/redis.module";
 import { StorageModule } from "./storage/storage.module";
@@ -29,6 +32,8 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
       isGlobal: true,
       validate,
     }),
+    LoggingModule,
+    MetricsModule,
     BullModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -62,5 +67,6 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer.apply(TenantMiddleware).forRoutes("*");
+    consumer.apply(MetricsMiddleware).exclude("/metrics").forRoutes("*");
   }
 }

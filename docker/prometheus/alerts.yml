@@ -1,0 +1,35 @@
+groups:
+  - name: logisense-api
+    rules:
+      - alert: ApiDown
+        expr: up{job="logisense-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API LogiSense fora do ar"
+          description: "O endpoint /metrics não respondeu ao scrape do Prometheus por mais de 1 minuto."
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status_code=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Taxa de erro HTTP acima de 5% nos últimos 5 minutos"
+          description: "{{ $value | humanizePercentage }} das requisições HTTP retornaram 5xx."
+
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+          > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Latência p95 acima de 1s nos últimos 5 minutos"
+          description: "p95 de latência HTTP está em {{ $value }}s."
