@@ -1,0 +1,43 @@
+node_modules
+**/node_modules
+.pnpm-store
+
+dist
+**/dist
+build
+**/build
+.next
+**/.next
+out
+**/out
+coverage
+**/coverage
+.turbo
+**/.turbo
+
+# Sem `**/` esses padrões só bateriam no nível raiz do contexto de build
+# (regra do dockerignore, diferente do .gitignore) — apps/api/.env chegou a
+# vazar pra dentro da imagem antes desse fix (ver ADR-018).
+.env
+**/.env
+.env.local
+**/.env.local
+.env.*.local
+**/.env.*.local
+
+.git
+.github
+
+*.log
+**/*.log
+npm-debug.log*
+**/npm-debug.log*
+pnpm-debug.log*
+**/pnpm-debug.log*
+
+.DS_Store
+.vscode
+.idea
+
+*.tsbuildinfo
+**/*.tsbuildinfo

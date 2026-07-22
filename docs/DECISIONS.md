@@ -1027,3 +1027,143 @@ já era português; correção direta, não escopo novo).
 via `class-validator`) nem exportação/consulta de leads capturados (não há
 endpoint admin pra listá-los — só existem na tabela). Ambos ficam pra um
 follow-up se o formulário for exposto publicamente em produção.
+
+## ADR-016: Build de produção via `pnpm deploy`, não `pnpm install --prod`
+
+**Status:** Aceito
+
+### Contexto
+
+Fase 15 pede Dockerfile de produção pra `apps/api`. É um workspace pnpm
+dentro de um monorepo — `pnpm install --prod` na raiz instalaria as
+dependências de produção de **todos** os workspaces (`apps/web` incluso),
+inflando a imagem com pacotes que a API nunca usa.
+
+### `pnpm --filter @logisense/api deploy --prod /app/out`
+
+`pnpm deploy` é o comando nativo do pnpm pra extrair um único workspace de
+um monorepo para uma pasta autocontida: resolve só as dependências de
+produção daquele workspace e materializa um `node_modules` sem os symlinks
+que o pnpm normalmente usa pra apontar pro store compartilhado (que não
+existiriam fora do monorepo). O runtime stage do Dockerfile copia só esse
+`node_modules` extraído, mais o `dist/` do build e o `prisma/` (schema +
+migrations, necessários em runtime pelo `prisma migrate deploy`) — nunca o
+restante do monorepo.
+
+`prisma` saiu de `devDependencies` pra `dependencies` em `apps/api/package.json`
+nesta fase: o binário `prisma` precisa estar presente no `node_modules` de
+produção porque `docker-entrypoint.sh` roda `prisma migrate deploy` no
+runtime stage, que só tem as dependências de produção. Pelo mesmo motivo
+`dotenv` também virou `dependencies` — `prisma.config.ts` importa
+`dotenv/config`, e é o `prisma.config.ts` (não o `schema.prisma`, que não
+declara `url`) quem resolve `DATABASE_URL` pro `migrate deploy` nesta
+versão do Prisma; sem copiá-lo pro runtime stage o comando falha com
+"datasource.url property is required" (descoberto rodando a imagem de
+verdade com `docker run`, não só com `docker build` — o build passava sem
+acusar nada porque `migrate deploy` só roda no entrypoint, em runtime).
+
+### Rejeitado
+
+- `pnpm install --prod` na raiz do monorepo — traria dependências de
+  `apps/web` pra dentro da imagem da API.
+- Copiar `node_modules` inteiro do build stage (com devDependencies) pro
+  runtime — imagem maior sem necessidade; nada em runtime usa `nest build`,
+  `jest`, etc.
+
+## ADR-017: `COPY --chown` em vez de `chown -R` no runtime stage
+
+**Status:** Aceito
+
+### Contexto
+
+A primeira versão do runtime stage do `apps/api/Dockerfile` copiava tudo
+como root e só no final rodava `chown -R app:app /app` pra passar a posse
+pro usuário não-root. Isso significa um segundo passeio recursivo por cada
+arquivo de `node_modules` (milhares de arquivos) depois que a cópia já
+tinha feito o primeiro passeio — no ambiente de build usado nesta sessão
+esse `chown -R` sozinho levou horas (I/O anormalmente lento pra chown em
+massa), evidenciando o desperdício mesmo quando o ambiente é normal.
+
+### `COPY --from=... --chown=app:app` em cada COPY
+
+Cada `COPY` do runtime stage passou a receber `--chown=app:app` direto,
+aplicando a posse correta durante a própria cópia em vez de um passo
+separado depois. O usuário `app` precisa existir antes das COPY (o
+`addgroup`/`adduser` subiu pra antes delas). Resultado: um único passeio
+por arquivo em vez de dois, sem mudar o comportamento final da imagem (o
+mesmo usuário não-root roda `docker-entrypoint.sh`/`node dist/main`).
+
+### Rejeitado
+
+- Manter `chown -R app:app /app` no final — redundante com o que a COPY já
+  faz arquivo por arquivo, e mais caro.
+
+## ADR-018: Padrões `**/` em todo o `.dockerignore`, não só nível raiz
+
+**Status:** Aceito
+
+### Contexto
+
+A primeira versão do `.dockerignore` (sessão anterior) misturava padrões
+bare (`.env`, `*.log`, `.turbo`, `*.tsbuildinfo`) com alguns pares `**/`
+(`**/node_modules`, `**/dist`, `**/coverage`) sem consistência. Diferente
+do `.gitignore`, um padrão sem `/` no `.dockerignore` **não** é aplicado em
+qualquer profundidade — só bate no nível raiz do contexto de build.
+Confirmado empiricamente com um Dockerfile de debug (`COPY . .` + `find`):
+`apps/api/tsconfig.build.tsbuildinfo` (cache local de TS incremental de uma
+sessão anterior, gitignored mas não coberto pelo padrão bare
+`*.tsbuildinfo`) vazou pro contexto, confundiu o `nest build` incremental
+dentro do container e a imagem subiu sem `dist/observability/` —
+`node dist/main` quebrava com `Cannot find module './observability/tracing'`
+só em runtime, não no `docker build` (só class dentro do
+`docker-entrypoint.sh`/`node dist/main`). Mesma causa raiz confirmou vazar
+`apps/api/.env` (segredos de dev reais) e `apps/web/.env.local` pra dentro
+da imagem — risco de credenciais locais indo parar em layers de imagem.
+
+### Toda entrada relevante ganhou o par `**/`
+
+`.env`/`.env.local`/`.env.*.local`/`*.log`/`npm-debug.log*`/
+`pnpm-debug.log*`/`.turbo`/`build`/`out` passaram a ter também a variante
+`**/`, no mesmo padrão que `node_modules`/`dist`/`coverage`/`.next` já
+usavam. `apps/api/.env.test.local` (linha explícita e redundante) saiu —
+já cai em `**/.env.*.local`.
+
+### Rejeitado
+
+- Confiar que BuildKit trata padrões bare como recursivos (como
+  `.gitignore`) — falso, confirmado pelo vazamento real.
+- Corrigir só o padrão de `*.tsbuildinfo` (o bug que derrubou o build) e
+  deixar os outros bare — o mesmo vazamento por segredo (`.env`) é mais
+  grave e tinha a mesma causa raiz.
+
+## ADR-019: `DATABASE_URL` dummy no build stage do Dockerfile da api
+
+**Status:** Aceito
+
+### Contexto
+
+Consertar o vazamento de `apps/api/.env` pro contexto de build (ADR-018)
+quebrou o build: `pnpm install` roda `prisma generate` via `postinstall`,
+que carrega `prisma.config.ts` — e esse arquivo resolve `DATABASE_URL` via
+`env()` (Prisma 7, ver ADR-016 no memory de projeto) **na hora de montar o
+config, não só na hora de conectar**. Sem `.env` vazando mais uma
+`DATABASE_URL` real pro container, `RUN pnpm install --frozen-lockfile`
+passou a falhar com `PrismaConfigEnvError: Cannot resolve environment
+variable: DATABASE_URL` — mesmo `prisma generate` nunca abrindo conexão
+nenhuma, só lendo o schema e gerando o client.
+
+### `ENV DATABASE_URL` dummy antes do `pnpm install`, no build stage
+
+Uma connection string qualquer (`mysql://build:build@localhost:3306/build`)
+satisfaz o `env()` sem que nada tente de fato conectar nela — `generate`
+não toca em rede. Só existe no build stage; o runtime stage não herda `ENV`
+de outro stage, então a imagem final não carrega esse valor, e
+`docker-entrypoint.sh` sempre usa a `DATABASE_URL` real injetada pelo
+Railway/ambiente em runtime pro `prisma migrate deploy`.
+
+### Rejeitado
+
+- Deixar `.env` vazar pro contexto de novo só pra isso funcionar — reabre o
+  problema de segredo do ADR-018.
+- Tornar `datasource.url` opcional em `prisma.config.ts` — mexeria em
+  comportamento de dev/test também, não só do build de produção.
