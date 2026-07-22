@@ -958,3 +958,72 @@ o essencial, mas não há paralelização real entre arquivos de teste
 (`--runInBand`): a suíte de integração/e2e é sequencial por design, o que é
 aceitável no tamanho atual mas pode precisar de revisão se o número de specs
 crescer muito.
+
+## ADR-015: Landing page — route group de marketing, lead real e SEO nativo do Next
+
+**Status:** Aceito
+
+### Contexto
+
+`apps/web/src/app/page.tsx` era um placeholder (título + 3 links de dev).
+A Fase 14 pede estrutura de marketing separada da app autenticada, seções
+(hero/features/pricing/CTA/footer), SEO básico e um formulário de
+contato/lead. Não havia `middleware.ts` nem route groups — todas as rotas
+eram irmãs diretas sob `app/`.
+
+### Route group `(marketing)`, não uma reestruturação completa
+
+Só a landing entrou em `app/(marketing)/` (layout próprio com
+`SiteHeader`/`SiteFooter`). `login`, `dashboard` e `freight-quotes/new`
+**não foram movidos** para um grupo `(app)` — continuam exatamente onde
+estavam. Route groups do App Router não mudam a URL, só afetam qual layout
+uma rota herda; a separação pedida ("rota pública separada da app
+autenticada") já é satisfeita pelo layout de marketing não vazar para as
+páginas autenticadas, sem precisar mexer em arquivos já testados
+(`login/page.tsx`, `login/page.spec.tsx`, etc.). Reagrupar as rotas
+autenticadas em `(app)` fica pra quando (se) elas precisarem de um layout
+compartilhado próprio (nav da aplicação, por exemplo).
+
+### Lead real, não só client-side
+
+Confirmado com o usuário: o formulário de contato persiste de verdade.
+Novo model `Lead` (`id`/`name`/`email`/`company?`/`message?`/`createdAt`)
+**fora** do `TENANT_SCOPED_PRISMA` — é a primeira entidade do schema sem
+`tenantId`, porque é capturada antes de qualquer tenant existir. `POST
+/leads` (`apps/api/src/leads/`) não tem `@UseGuards` nenhum — é o segundo
+endpoint verdadeiramente público da API depois de `/auth/register` e
+`/auth/login`. Não precisou entrar em `EXCLUDED_PATH_PREFIXES` do
+`MutationAuditInterceptor` (ADR-012): sem `getTenantContext()` (rota
+pública, sem usuário autenticado) o interceptor já é um no-op, mesmo
+comportamento de `/health`/`/metrics`. Sem rate limiting — fora do escopo
+desta fase (pediu "formulário", não "proteção anti-spam"); o
+`RateLimiter` já existente em `integrations/common` (Fase 7) é o candidato
+óbvio se isso virar necessário depois.
+
+### SEO via convenções nativas do Next, sem dependência nova
+
+`app/sitemap.ts`/`app/robots.ts` (arquivos especiais do App Router) em vez
+de `next-sitemap` — evita uma dependência inteira pra gerar dois arquivos
+estáticos. `app/opengraph-image.tsx` usa `ImageResponse` de `next/og`
+(embutido no Next desde a v13) pra gerar o card OG em runtime a partir de
+JSX, em vez de depender de um PNG estático versionado no repo. `layout.tsx`
+ganhou `metadataBase`/`openGraph`/`twitter`/`robots` — antes só tinha
+`title`/`description`. `<html lang="en">` → `lang="pt-BR"` (todo o conteúdo
+já era português; correção direta, não escopo novo).
+
+### Rejeitado
+
+- Mover `login`/`dashboard`/`freight-quotes` para um grupo `(app)` agora —
+  nenhum ganho imediato, só diff maior em arquivos já testados.
+- `next-sitemap` ou geração de OG image estática — convenções nativas do
+  Next cobrem o pedido ("SEO básico") sem dependência nova.
+- Rate limiting em `/leads` — fora do escopo pedido pela fase.
+- Formulário de contato sem persistência — decisão explícita do usuário
+  pela opção com backend real.
+
+### Limitação conhecida
+
+`/leads` não tem nenhuma proteção contra spam/abuso (só validação de forma
+via `class-validator`) nem exportação/consulta de leads capturados (não há
+endpoint admin pra listá-los — só existem na tabela). Ambos ficam pra um
+follow-up se o formulário for exposto publicamente em produção.

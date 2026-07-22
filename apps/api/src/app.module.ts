@@ -16,6 +16,7 @@ import { InsightsModule } from "./insights/insights.module";
 import { CnpjModule } from "./integrations/cnpj/cnpj.module";
 import { IntegrationsCommonModule } from "./integrations/common/integrations-common.module";
 import { ViaCepModule } from "./integrations/viacep/viacep.module";
+import { LeadsModule } from "./leads/leads.module";
 import { LoggingModule } from "./observability/logging/logging.module";
 import { MetricsMiddleware } from "./observability/metrics/metrics.middleware";
 import { MetricsModule } from "./observability/metrics/metrics.module";
@@ -61,6 +62,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     InsightsModule,
     WebhooksModule,
     AttachmentsModule,
+    LeadsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

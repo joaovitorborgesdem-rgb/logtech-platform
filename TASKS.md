@@ -151,10 +151,18 @@ Legenda: `[x]` feito · `[ ]` pendente
       `statements`) no `apps/api`, `.github/workflows/ci.yml`
 
 ## 14. Landing page
-- [ ] Estrutura de marketing (Next.js, rota pública separada da app autenticada)
-- [ ] Seções: hero, features, pricing, CTA, footer
-- [ ] SEO básico (meta tags, sitemap, OG)
-- [ ] Formulário de contato/lead
+- [x] Estrutura de marketing (Next.js, rota pública separada da app
+      autenticada) — route group `apps/web/src/app/(marketing)/` com layout
+      próprio (header/footer de marketing); `login`/`dashboard`/
+      `freight-quotes` continuam nos mesmos paths, sem herdar esse chrome
+- [x] Seções: hero, features, pricing, CTA, footer — componentes em
+      `apps/web/src/components/marketing/`
+- [x] SEO básico (meta tags, sitemap, OG) — `metadata` expandido em
+      `app/layout.tsx` (OG/Twitter/robots), `app/sitemap.ts`, `app/robots.ts`,
+      `app/opengraph-image.tsx` (gerado via `next/og`, sem asset estático)
+- [x] Formulário de contato/lead — model `Lead` (Prisma, fora do
+      `TENANT_SCOPED_PRISMA`) + `POST /leads` público (`apps/api/src/leads/`)
+      + `<ContactForm />` cliente
 
 ## 15. Deploy
 - [ ] Dockerfiles de produção (api e web)

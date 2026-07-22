@@ -262,3 +262,16 @@ model Attachment {
 
   @@index([tenantId, entityType, entityId])
 }
+
+/// Lead capturado pelo formulário de contato da landing page (Fase 14) —
+/// não é tenant-scoped, é público, não passa por TENANT_SCOPED_PRISMA.
+model Lead {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  company   String?
+  message   String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
