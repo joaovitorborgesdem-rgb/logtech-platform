@@ -1,5 +1,67 @@
 # Deploy (Railway)
 
+## Status atual (2026-07-23)
+
+### ✅ Feito
+
+- Dockerfiles de produção (`apps/api/Dockerfile`, `apps/web/Dockerfile`),
+  `docker-entrypoint.sh`, `railway.json` de cada app — mergeados em `main`
+  (commit `2690f84`).
+- Pipeline CI/CD (`.github/workflows/ci.yml`): `build-and-test` →
+  `deploy-staging` → `deploy-production`.
+- GitHub Environments `staging` e `production` criados; `production` com
+  required reviewer configurado (gate manual).
+- `RAILWAY_TOKEN` configurado nos dois Environments — **Project Token**
+  (gerado dentro do projeto Railway, escopado a cada ambiente), não Account
+  Token. Um token diferente por ambiente.
+- Projeto Railway criado, com os serviços `api` e `web` conectados ao
+  repositório GitHub, Root Directory `/` e Config-as-code apontando pros
+  `railway.json` corretos.
+- `deploy-staging` **passou** no CI (run `29968311203`).
+- `deploy-production` dispara e fica `waiting`, pendente da aprovação
+  manual do required reviewer — comportamento esperado, não é falha.
+
+### ⏳ Pendente (direto no painel do Railway)
+
+Sem isso, o container até pode subir mas vai falhar no boot ou funcionar
+com dados/URLs errados — **não aprove o `deploy-production` pendente antes
+de terminar esta lista para o ambiente `production`**:
+
+1. **Plugins MySQL e Redis** — provisionar um de cada por ambiente
+   (`staging` e `production`), nunca compartilhados entre si nem com dev
+   local.
+2. **Env vars do serviço `api`**, por ambiente (Settings > Variables):
+   - Obrigatórias (sem elas o boot quebra na validação de config,
+     `apps/api/src/config/env.validation.ts`): `DATABASE_URL`,
+     `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`.
+   - `DATABASE_URL` pode referenciar a variável do plugin MySQL do próprio
+     ambiente (`${{MySQL.DATABASE_URL}}`) em vez de um valor fixo.
+   - Têm default de **dev** que não serve pra produção (apontam pro Redis
+     e MinIO locais) — sobrescrever: `REDIS_HOST`/`REDIS_PORT`/`REDIS_DB`
+     (referenciar plugin Redis do ambiente), `S3_ENDPOINT`, `S3_REGION`,
+     `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`,
+     `S3_FORCE_PATH_STYLE`, `CORS_ORIGIN`.
+   - Opcionais, default razoável: `JWT_ACCESS_EXPIRES_IN`,
+     `JWT_REFRESH_EXPIRES_IN`, `PORT`, `OTEL_EXPORTER_OTLP_ENDPOINT`,
+     `OTEL_SERVICE_NAME`.
+   - Decidir e apontar `S3_*` pro storage real de produção (AWS S3 ou outro
+     S3-compatible) — o default é o MinIO de dev, que não existe em prod.
+3. **Env vars do serviço `web`**, por ambiente: `NEXT_PUBLIC_API_URL`,
+   `NEXT_PUBLIC_SITE_URL` (apontando pro domínio real de cada ambiente).
+4. **Checar deploy duplicado**: os serviços foram conectados direto ao
+   repo GitHub no Railway — confirmar se isso não liga também o
+   auto-deploy nativo do Railway por push (Settings > Source do serviço).
+   Se estiver ligado, o Railway pode tentar buildar/deployar em paralelo
+   ao `railway up` disparado pelo `ci.yml`, duplicando o trabalho. Se não
+   for intencional, desligar o auto-deploy do Railway e deixar só o CI
+   como fonte de deploy.
+5. Só depois de 1–4 prontos para `production`: aprovar o job
+   `deploy-production` pendente no GitHub (Environment `production`).
+6. (Opcional, sem bloquear o resto) Domínio próprio — ver seção "Domínio e
+   TLS" abaixo.
+
+---
+
 Dois serviços Railway no mesmo projeto, cada um construído a partir do seu
 Dockerfile com **Root Directory = `/` (raiz do monorepo)** — o build precisa
 do workspace pnpm inteiro para resolver as dependências internas. Configure

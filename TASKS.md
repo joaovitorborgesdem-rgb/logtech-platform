@@ -185,11 +185,21 @@ Legenda: `[x]` feito · `[ ]` pendente
       `*.up.railway.app` com TLS automático; domínio próprio via CNAME
       documentado no `DEPLOY.md`
 
-> Nota: código e testes da Fase 15 estão completos e mergeados (`main`,
-> commit `2690f84`), mas o deploy real ainda não está ativo — os secrets
-> `RAILWAY_TOKEN` (`staging`/`production`) precisam ser configurados nos
-> GitHub Environments antes do `deploy-staging`/`deploy-production`
-> passarem no CI. Ver memory de projeto para retomar.
+> Nota (atualizada 2026-07-23): código e testes da Fase 15 estão completos e
+> mergeados (`main`, commit `2690f84`). CI/CD já está funcionando de
+> verdade — GitHub Environments `staging`/`production` criados, `RAILWAY_TOKEN`
+> (Project Token, um por ambiente) configurado nos dois, projeto Railway
+> criado com os serviços `api`/`web` conectados ao repo. `deploy-staging`
+> passou no CI (run `29968311203`); `deploy-production` dispara e fica
+> `waiting`, pendente da aprovação manual do required reviewer — exatamente
+> o gate esperado.
+>
+> Ainda falta, direto no painel do Railway, antes de aprovar o deploy de
+> produção: provisionar os plugins MySQL/Redis por ambiente e configurar as
+> env vars reais de cada serviço (`DATABASE_URL`, `JWT_ACCESS_SECRET`,
+> `JWT_REFRESH_SECRET` são obrigatórias; o resto tem default de dev que
+> **não** serve pra produção). Checklist completo e detalhado em
+> `DEPLOY.md`, seção "Status atual".
 
 ---
 
