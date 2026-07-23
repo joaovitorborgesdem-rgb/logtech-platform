@@ -165,14 +165,37 @@ Legenda: `[x]` feito · `[ ]` pendente
       + `<ContactForm />` cliente
 
 ## 15. Deploy
-- [ ] Dockerfiles de produção (api e web)
-- [ ] Pipeline CI/CD (lint, test, build, deploy)
-- [ ] Configuração de ambientes (staging/produção)
-- [ ] Gerenciamento de segredos
-- [ ] Migrações Prisma automatizadas no deploy
-- [ ] Domínio, TLS e infraestrutura (definir provedor)
+- [x] Dockerfiles de produção (api e web) — multi-stage, `pnpm deploy --prod`
+      pra api (ADR-016) e `output: standalone` do Next.js pra web;
+      `COPY --chown` em vez de `chown -R` no runtime stage (ADR-017)
+- [x] Pipeline CI/CD (lint, test, build, deploy) — `.github/workflows/ci.yml`:
+      `build-and-test` seguido de `deploy-staging`/`deploy-production` via
+      Railway CLI
+- [x] Configuração de ambientes (staging/produção) — GitHub Environments
+      `staging`/`production`, cada um com MySQL/Redis próprios no Railway;
+      `production` com required reviewers como gate manual pós-staging
+- [x] Gerenciamento de segredos — `.dockerignore` com padrões `**/` em todo
+      arquivo sensível (ADR-018); `RAILWAY_TOKEN` por ambiente, nunca
+      compartilhado entre staging/produção; ver `DEPLOY.md`
+- [x] Migrações Prisma automatizadas no deploy — `docker-entrypoint.sh` roda
+      `prisma migrate deploy` a cada boot do container (idempotente);
+      `DATABASE_URL` dummy só no build stage pro `prisma generate` não falhar
+      (ADR-019)
+- [x] Domínio, TLS e infraestrutura (definir provedor) — Railway, subdomínio
+      `*.up.railway.app` com TLS automático; domínio próprio via CNAME
+      documentado no `DEPLOY.md`
+
+> Nota: código e testes da Fase 15 estão completos e mergeados (`main`,
+> commit `2690f84`), mas o deploy real ainda não está ativo — os secrets
+> `RAILWAY_TOKEN` (`staging`/`production`) precisam ser configurados nos
+> GitHub Environments antes do `deploy-staging`/`deploy-production`
+> passarem no CI. Ver memory de projeto para retomar.
 
 ---
 
 ## Próximo passo imediato
-Implementar Fase 1 (autenticação): JWT + refresh token, hash de senha, endpoints e guards.
+Fases 0–15 concluídas. Configurar os segredos `RAILWAY_TOKEN` (staging e
+produção) nos GitHub Environments para ativar o deploy automático; a
+partir daí, avaliar próximos incrementos (ex.: itens pendentes das fases
+1/2/4/9 — reset de senha, convites/planos por tenant, rastreamento de
+frete, Bull Board/dead-letter).
