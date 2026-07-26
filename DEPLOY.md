@@ -1,8 +1,8 @@
 # Deploy (Railway)
 
-## Status atual (2026-07-23)
+## Status atual (2026-07-26)
 
-### ✅ Feito
+### ✅ Validado — pipeline completo funcionando fim a fim
 
 - Dockerfiles de produção (`apps/api/Dockerfile`, `apps/web/Dockerfile`),
   `docker-entrypoint.sh`, `railway.json` de cada app — mergeados em `main`
@@ -15,21 +15,41 @@
   (gerado dentro do projeto Railway, escopado a cada ambiente), não Account
   Token. Um token diferente por ambiente.
 - Projeto Railway criado, com os serviços `api` e `web` conectados ao
-  repositório GitHub, Root Directory `/` e Config-as-code apontando pros
-  `railway.json` corretos.
+  repositório GitHub em **ambos** os ambientes (`staging` e `production`),
+  Root Directory `/` e Config-as-code apontando pros `railway.json`
+  corretos.
+- Plugins MySQL e Redis provisionados por ambiente, env vars de `api`/`web`
+  configuradas (ver checklist na seção seguinte).
 - `deploy-staging` **passou** no CI (run `29968311203`).
-- `deploy-production` dispara e fica `waiting`, pendente da aprovação
-  manual do required reviewer — comportamento esperado, não é falha.
+- `deploy-production` **passou** no CI (run `30213980045`, aprovado
+  manualmente) — `api` e `web` no ar, healthcheck (`GET /health`) verde.
 
-### ⏳ Pendente (direto no painel do Railway)
+### ⚠️ Lição aprendida: Project Token é escopado ao Environment ID, não ao nome
 
-Sem isso, o container até pode subir mas vai falhar no boot ou funcionar
-com dados/URLs errados — **não aprove o `deploy-production` pendente antes
-de terminar esta lista para o ambiente `production`**:
+Um Project Token do Railway fica preso ao **Environment ID** do momento em
+que foi gerado, não ao nome do ambiente. Isso mordeu duas vezes nesse
+deploy:
 
-1. **Plugins MySQL e Redis** — provisionar um de cada por ambiente
-   (`staging` e `production`), nunca compartilhados entre si nem com dev
-   local.
+- Apagar o **projeto** inteiro e recriar invalida todos os tokens gerados
+  nele (óbvio, mas gerou o primeiro `Failed to upload code with status
+  code 404 Not Found`).
+- Apagar só o **ambiente** `production` (pra recriar do zero, duplicando de
+  `staging`) também invalida o token — mesmo o ambiente novo se chamando
+  `production` de novo, ele tem um Environment ID diferente. O sintoma aí
+  foi mais claro (`Invalid RAILWAY_TOKEN`) do que o 404 do caso anterior.
+
+**Regra prática:** sempre que um projeto ou ambiente Railway for apagado e
+recriado (mesmo com o mesmo nome), gerar um Project Token novo pro
+ambiente novo e atualizar o secret `RAILWAY_TOKEN` correspondente no GitHub
+Environment — nunca assumir que o token antigo continua valendo.
+
+### Checklist de configuração por ambiente (staging e production)
+
+Sem isso, o container até pode subir mas vai falhar no boot, no
+healthcheck, ou funcionar com dados/URLs errados:
+
+1. **Plugins MySQL e Redis** — um de cada por ambiente, nunca compartilhados
+   entre si nem com dev local.
 2. **Env vars do serviço `api`**, por ambiente (Settings > Variables):
    - Obrigatórias (sem elas o boot quebra na validação de config,
      `apps/api/src/config/env.validation.ts`): `DATABASE_URL`,
@@ -57,9 +77,7 @@ de terminar esta lista para o ambiente `production`**:
    ao `railway up` disparado pelo `ci.yml`, duplicando o trabalho. Se não
    for intencional, desligar o auto-deploy do Railway e deixar só o CI
    como fonte de deploy.
-5. Só depois de 1–4 prontos para `production`: aprovar o job
-   `deploy-production` pendente no GitHub (Environment `production`).
-6. (Opcional, sem bloquear o resto) Domínio próprio — ver seção "Domínio e
+5. (Opcional, sem bloquear o resto) Domínio próprio — ver seção "Domínio e
    TLS" abaixo.
 
 ---

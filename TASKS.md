@@ -185,27 +185,22 @@ Legenda: `[x]` feito · `[ ]` pendente
       `*.up.railway.app` com TLS automático; domínio próprio via CNAME
       documentado no `DEPLOY.md`
 
-> Nota (atualizada 2026-07-23): código e testes da Fase 15 estão completos e
-> mergeados (`main`, commit `2690f84`). CI/CD já está funcionando de
-> verdade — GitHub Environments `staging`/`production` criados, `RAILWAY_TOKEN`
-> (Project Token, um por ambiente) configurado nos dois, projeto Railway
-> criado com os serviços `api`/`web` conectados ao repo. `deploy-staging`
-> passou no CI (run `29968311203`); `deploy-production` dispara e fica
-> `waiting`, pendente da aprovação manual do required reviewer — exatamente
-> o gate esperado.
+> Nota (atualizada 2026-07-26): Fase 15 concluída e **validada de ponta a
+> ponta em produção**. Pipeline completo passou no CI: `build-and-test` →
+> `deploy-staging` (run `29968311203`) → `deploy-production` (run
+> `30213980045`, aprovado manualmente pelo required reviewer) — `api` e
+> `web` no ar em `production`, healthcheck (`GET /health`) verde.
 >
-> Ainda falta, direto no painel do Railway, antes de aprovar o deploy de
-> produção: provisionar os plugins MySQL/Redis por ambiente e configurar as
-> env vars reais de cada serviço (`DATABASE_URL`, `JWT_ACCESS_SECRET`,
-> `JWT_REFRESH_SECRET` são obrigatórias; o resto tem default de dev que
-> **não** serve pra produção). Checklist completo e detalhado em
-> `DEPLOY.md`, seção "Status atual".
+> Detalhes, checklist de configuração por ambiente e a lição aprendida sobre
+> Project Token ficar preso ao Environment ID (não ao nome do ambiente —
+> recriar um ambiente Railway invalida o token mesmo mantendo o nome) estão
+> em `DEPLOY.md`, seção "Status atual".
 
 ---
 
 ## Próximo passo imediato
-Fases 0–15 concluídas. Configurar os segredos `RAILWAY_TOKEN` (staging e
-produção) nos GitHub Environments para ativar o deploy automático; a
-partir daí, avaliar próximos incrementos (ex.: itens pendentes das fases
-1/2/4/9 — reset de senha, convites/planos por tenant, rastreamento de
-frete, Bull Board/dead-letter).
+Fases 0–15 concluídas, deploy de produção validado e funcionando. Avaliar
+próximos incrementos (ex.: itens pendentes das fases 1/2/4/9 — reset de
+senha, convites/planos por tenant, rastreamento de frete, Bull
+Board/dead-letter) ou domínio próprio (ver `DEPLOY.md`, seção "Domínio e
+TLS").
