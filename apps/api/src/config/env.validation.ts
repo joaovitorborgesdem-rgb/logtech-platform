@@ -62,6 +62,10 @@ class EnvironmentVariables {
 
   @IsString()
   @IsOptional()
+  REDIS_PASSWORD?: string;
+
+  @IsString()
+  @IsOptional()
   S3_ENDPOINT: string = "http://localhost:9000";
 
   @IsString()
