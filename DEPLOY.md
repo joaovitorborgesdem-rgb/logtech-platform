@@ -35,12 +35,14 @@ de terminar esta lista para o ambiente `production`**:
      `apps/api/src/config/env.validation.ts`): `DATABASE_URL`,
      `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`.
    - `DATABASE_URL` pode referenciar a variável do plugin MySQL do próprio
-     ambiente (`${{MySQL.DATABASE_URL}}`) em vez de um valor fixo.
+     ambiente (`${{MySQL.MYSQL_URL}}`) em vez de um valor fixo.
    - Têm default de **dev** que não serve pra produção (apontam pro Redis
-     e MinIO locais) — sobrescrever: `REDIS_HOST`/`REDIS_PORT`/`REDIS_DB`
-     (referenciar plugin Redis do ambiente), `S3_ENDPOINT`, `S3_REGION`,
-     `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`,
-     `S3_FORCE_PATH_STYLE`, `CORS_ORIGIN`.
+     e MinIO locais) — sobrescrever: `REDIS_HOST` (`${{Redis.REDISHOST}}`),
+     `REDIS_PORT` (`${{Redis.REDISPORT}}`), `REDIS_PASSWORD`
+     (`${{Redis.REDISPASSWORD}}` — obrigatório, o plugin Redis do Railway
+     sempre exige senha), `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`,
+     `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`,
+     `CORS_ORIGIN`.
    - Opcionais, default razoável: `JWT_ACCESS_EXPIRES_IN`,
      `JWT_REFRESH_EXPIRES_IN`, `PORT`, `OTEL_EXPORTER_OTLP_ENDPOINT`,
      `OTEL_SERVICE_NAME`.
@@ -96,10 +98,12 @@ em Settings > Environments do repo). Esse é o gate staging -> produção.
   versionado como referência de quais variáveis existem.
 - Runtime (api): configurar como env vars do serviço Railway, por ambiente —
   ver `apps/api/.env.example` para a lista (`DATABASE_URL`,
-  `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `REDIS_HOST`/`REDIS_PORT`,
-  `S3_*`, `CORS_ORIGIN`, etc.). `DATABASE_URL` e `REDIS_HOST`/`REDIS_PORT`
-  podem referenciar as variáveis dos plugins MySQL/Redis do próprio ambiente
-  Railway (`${{MySQL.DATABASE_URL}}` etc.) em vez de valores fixos.
+  `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `REDIS_HOST`/`REDIS_PORT`/
+  `REDIS_PASSWORD`, `S3_*`, `CORS_ORIGIN`, etc.). `DATABASE_URL` e
+  `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD` podem referenciar as variáveis
+  dos plugins MySQL/Redis do próprio ambiente Railway (`${{MySQL.MYSQL_URL}}`,
+  `${{Redis.REDISHOST}}`, `${{Redis.REDISPORT}}`, `${{Redis.REDISPASSWORD}}`)
+  em vez de valores fixos.
 - Build-time (web): `NEXT_PUBLIC_API_URL` e `NEXT_PUBLIC_SITE_URL` são
   embutidos no bundle client durante `next build` — precisam existir tanto
   como env var do serviço quanto chegar como `ARG` no build (o Dockerfile já
