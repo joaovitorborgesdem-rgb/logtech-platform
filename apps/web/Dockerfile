@@ -9,6 +9,11 @@ WORKDIR /app
 
 FROM base AS build
 COPY . .
+# `pnpm install` na raiz roda o postinstall de TODO workspace, inclusive o
+# `prisma generate` do @logisense/api — que resolve DATABASE_URL via
+# prisma.config.ts na hora de montar a config, mesmo o web não usando Prisma
+# (ver ADR-019). Mesmo dummy do apps/api/Dockerfile; nunca conecta de verdade.
+ENV DATABASE_URL="mysql://build:build@localhost:3306/build"
 RUN pnpm install --frozen-lockfile
 # NEXT_PUBLIC_* são embutidos no bundle client em build time — precisam
 # chegar como build args (Railway injeta as env vars do serviço também como
