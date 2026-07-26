@@ -120,11 +120,14 @@ jobs:
       # Debug temporário — diagnosticar "Failed to upload code with status
       # code 404 Not Found" no railway up. Remover depois de confirmar a
       # causa (token->projeto/ambiente errado, ou serviço "api" ausente em
-      # production).
+      # production). `whoami` foi removido: Project Tokens (RAILWAY_TOKEN)
+      # não suportam esse comando, só RAILWAY_API_TOKEN (conta) — só
+      # `status` é compatível com token de projeto/ambiente. `|| true` em
+      # cada linha evita que o `-e` do shell aborte antes de rodar as duas.
       - name: Debug Railway token context
         run: |
-          railway whoami
-          railway status
+          railway --version
+          railway status || true
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
