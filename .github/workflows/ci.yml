@@ -117,6 +117,17 @@ jobs:
       - name: Install Railway CLI
         run: npm i -g @railway/cli
 
+      # Debug temporário — diagnosticar "Failed to upload code with status
+      # code 404 Not Found" no railway up. Remover depois de confirmar a
+      # causa (token->projeto/ambiente errado, ou serviço "api" ausente em
+      # production).
+      - name: Debug Railway token context
+        run: |
+          railway whoami
+          railway status
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
       - name: Deploy api (production)
         run: railway up --service api --environment production --detach
         env:
