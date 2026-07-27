@@ -101,17 +101,6 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
-      # Debug temporário — nenhum domínio público existia ainda pra api/web.
-      # `railway domain` (sem subcomando) gera um domínio *.up.railway.app
-      # se não existir, ou mostra o já existente — idempotente, seguro
-      # rodar de novo.
-      - name: Generate/show public domains (staging)
-        run: |
-          railway domain --service api --environment staging || true
-          railway domain --service web --environment staging || true
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-
   deploy-production:
     needs: deploy-staging
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -128,6 +117,19 @@ jobs:
       - name: Install Railway CLI
         run: npm i -g @railway/cli
 
+      # Fix temporário e único — CORS_ORIGIN/NEXT_PUBLIC_* foram configurados
+      # antes dos domínios *.up.railway.app existirem. Setar antes do deploy
+      # pra api-production-4091/web-production-a4aac (confirmados via
+      # `railway domain`) — importa rodar antes do `railway up` do web
+      # porque NEXT_PUBLIC_* são build args, resolvidos no build. Remover
+      # depois de confirmar (não precisa rodar de novo em deploys futuros).
+      - name: Fix production CORS_ORIGIN and NEXT_PUBLIC_* URLs
+        run: |
+          railway variable set CORS_ORIGIN=https://web-production-a4aac.up.railway.app --service api --environment production --skip-deploys
+          railway variable set NEXT_PUBLIC_API_URL=https://api-production-4091.up.railway.app NEXT_PUBLIC_SITE_URL=https://web-production-a4aac.up.railway.app --service web --environment production --skip-deploys
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
       - name: Deploy api (production)
         run: railway up --service api --environment production --detach
         env:
@@ -135,16 +137,5 @@ jobs:
 
       - name: Deploy web (production)
         run: railway up --service web --environment production --detach
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-
-      # Debug temporário — nenhum domínio público existia ainda pra api/web.
-      # `railway domain` (sem subcomando) gera um domínio *.up.railway.app
-      # se não existir, ou mostra o já existente — idempotente, seguro
-      # rodar de novo.
-      - name: Generate/show public domains (production)
-        run: |
-          railway domain --service api --environment production || true
-          railway domain --service web --environment production || true
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
