@@ -101,12 +101,14 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
-      # Debug temporário — só listar os domínios públicos pra conferência
-      # manual. `domain list` é read-only, não gera nem altera nada.
-      - name: List public domains (staging)
+      # Debug temporário — nenhum domínio público existia ainda pra api/web.
+      # `railway domain` (sem subcomando) gera um domínio *.up.railway.app
+      # se não existir, ou mostra o já existente — idempotente, seguro
+      # rodar de novo.
+      - name: Generate/show public domains (staging)
         run: |
-          railway domain list --service api --environment staging || true
-          railway domain list --service web --environment staging || true
+          railway domain --service api --environment staging || true
+          railway domain --service web --environment staging || true
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
@@ -136,11 +138,13 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
-      # Debug temporário — só listar os domínios públicos pra conferência
-      # manual. `domain list` é read-only, não gera nem altera nada.
-      - name: List public domains (production)
+      # Debug temporário — nenhum domínio público existia ainda pra api/web.
+      # `railway domain` (sem subcomando) gera um domínio *.up.railway.app
+      # se não existir, ou mostra o já existente — idempotente, seguro
+      # rodar de novo.
+      - name: Generate/show public domains (production)
         run: |
-          railway domain list --service api --environment production || true
-          railway domain list --service web --environment production || true
+          railway domain --service api --environment production || true
+          railway domain --service web --environment production || true
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
