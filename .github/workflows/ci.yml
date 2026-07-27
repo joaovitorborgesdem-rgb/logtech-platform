@@ -101,6 +101,15 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
+      # Debug temporário — só listar os domínios públicos pra conferência
+      # manual. `domain list` é read-only, não gera nem altera nada.
+      - name: List public domains (staging)
+        run: |
+          railway domain list --service api --environment staging || true
+          railway domain list --service web --environment staging || true
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
   deploy-production:
     needs: deploy-staging
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -124,5 +133,14 @@ jobs:
 
       - name: Deploy web (production)
         run: railway up --service web --environment production --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      # Debug temporário — só listar os domínios públicos pra conferência
+      # manual. `domain list` é read-only, não gera nem altera nada.
+      - name: List public domains (production)
+        run: |
+          railway domain list --service api --environment production || true
+          railway domain list --service web --environment production || true
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
