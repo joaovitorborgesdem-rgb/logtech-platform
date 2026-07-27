@@ -88,6 +88,38 @@ class EnvironmentVariables {
   @IsOptional()
   @Transform(({ value }) => value === true || value === "true")
   S3_FORCE_PATH_STYLE: boolean = true;
+
+  @IsString()
+  @IsOptional()
+  WEB_URL: string = "http://localhost:3001";
+
+  @IsString()
+  @IsOptional()
+  MFA_ISSUER: string = "LogiSense";
+
+  @IsString()
+  @IsOptional()
+  GOOGLE_CLIENT_ID: string = "not-configured";
+
+  @IsString()
+  @IsOptional()
+  GOOGLE_CLIENT_SECRET: string = "not-configured";
+
+  @IsString()
+  @IsOptional()
+  GOOGLE_CALLBACK_URL: string = "http://localhost:3000/auth/google/callback";
+
+  @IsString()
+  @IsOptional()
+  GITHUB_CLIENT_ID: string = "not-configured";
+
+  @IsString()
+  @IsOptional()
+  GITHUB_CLIENT_SECRET: string = "not-configured";
+
+  @IsString()
+  @IsOptional()
+  GITHUB_CALLBACK_URL: string = "http://localhost:3000/auth/github/callback";
 }
 
 export function validate(config: Record<string, unknown>) {

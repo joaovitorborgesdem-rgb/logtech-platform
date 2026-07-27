@@ -30,6 +30,9 @@ enum AuditAction {
   LOGOUT
   REGISTER
   OAUTH_LOGIN
+  MFA_ENABLED
+  MFA_DISABLED
+  MFA_VERIFY_FAILED
   USER_CREATED
   USER_UPDATED
   USER_DELETED
@@ -40,6 +43,11 @@ enum AuditAction {
   EXTERNAL_WEBHOOK_RECEIVED
   ATTACHMENT_DELETED
   HTTP_MUTATION
+}
+
+enum OAuthProvider {
+  GOOGLE
+  GITHUB
 }
 
 enum AttachmentEntityType {
@@ -80,20 +88,38 @@ model User {
   tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name         String
   email        String
-  passwordHash String
+  passwordHash String?
   role         UserRole   @default(MEMBER)
   status       UserStatus @default(INVITED)
+
+  mfaEnabled     Boolean @default(false)
+  mfaSecret      String?
+  mfaBackupCodes Json?
 
   refreshTokens RefreshToken[]
   auditLogs     AuditLog[]
   freightQuotes FreightQuote[]
   attachments   Attachment[]
+  oauthAccounts OAuthAccount[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([tenantId, email])
   @@index([tenantId])
+}
+
+model OAuthAccount {
+  id                String        @id @default(cuid())
+  userId            String
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          OAuthProvider
+  providerAccountId String
+
+  createdAt DateTime @default(now())
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 model RefreshToken {

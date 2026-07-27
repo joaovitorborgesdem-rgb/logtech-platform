@@ -1,10 +1,17 @@
 import { ConflictException, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
-import { AuditAction, UserRole, UserStatus } from "@prisma/client";
+import {
+  AuditAction,
+  OAuthProvider,
+  UserRole,
+  UserStatus,
+} from "@prisma/client";
 import * as bcrypt from "bcrypt";
 import { PrismaService } from "../prisma/prisma.service";
-import { AuthService } from "./auth.service";
+import { RedisService } from "../redis/redis.service";
+import { AuthResult, AuthService, MfaRequiredResult } from "./auth.service";
+import { MfaService } from "./mfa.service";
 
 jest.mock("bcrypt");
 
@@ -12,7 +19,13 @@ describe("AuthService", () => {
   let service: AuthService;
   let prisma: {
     tenant: { findUnique: jest.Mock; create: jest.Mock };
-    user: { findUnique: jest.Mock; create: jest.Mock };
+    user: {
+      findUnique: jest.Mock;
+      findUniqueOrThrow: jest.Mock;
+      create: jest.Mock;
+      update: jest.Mock;
+    };
+    oAuthAccount: { findUnique: jest.Mock; create: jest.Mock };
     refreshToken: {
       findUnique: jest.Mock;
       create: jest.Mock;
@@ -26,6 +39,15 @@ describe("AuthService", () => {
     verifyAsync: jest.Mock;
     decode: jest.Mock;
   };
+  let redis: { set: jest.Mock; get: jest.Mock; del: jest.Mock };
+  let mfaService: {
+    generateSecret: jest.Mock;
+    buildOtpAuthUrl: jest.Mock;
+    buildQrCodeDataUrl: jest.Mock;
+    verifyToken: jest.Mock;
+    generateBackupCodes: jest.Mock;
+    consumeBackupCode: jest.Mock;
+  };
 
   const baseUser = {
     id: "user-1",
@@ -35,6 +57,9 @@ describe("AuthService", () => {
     passwordHash: "hashed-password",
     role: UserRole.OWNER,
     status: UserStatus.ACTIVE,
+    mfaEnabled: false,
+    mfaSecret: null,
+    mfaBackupCodes: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -42,7 +67,13 @@ describe("AuthService", () => {
   beforeEach(() => {
     prisma = {
       tenant: { findUnique: jest.fn(), create: jest.fn() },
-      user: { findUnique: jest.fn(), create: jest.fn() },
+      user: {
+        findUnique: jest.fn(),
+        findUniqueOrThrow: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+      },
+      oAuthAccount: { findUnique: jest.fn(), create: jest.fn() },
       refreshToken: {
         findUnique: jest.fn(),
         create: jest.fn(),
@@ -60,6 +91,28 @@ describe("AuthService", () => {
       }),
     };
 
+    redis = { set: jest.fn(), get: jest.fn(), del: jest.fn() };
+
+    mfaService = {
+      generateSecret: jest.fn().mockReturnValue("MFASECRET"),
+      buildOtpAuthUrl: jest.fn().mockReturnValue("otpauth://totp/test"),
+      buildQrCodeDataUrl: jest
+        .fn()
+        .mockResolvedValue("data:image/png;base64,abc"),
+      verifyToken: jest.fn().mockReturnValue(false),
+      generateBackupCodes: jest.fn().mockReturnValue({
+        plainCodes: ["code1", "code2"],
+        stored: [
+          { codeHash: "hash1", usedAt: null },
+          { codeHash: "hash2", usedAt: null },
+        ],
+      }),
+      consumeBackupCode: jest.fn().mockReturnValue({
+        valid: false,
+        updatedCodes: [],
+      }),
+    };
+
     const configService = {
       get: jest.fn((key: string) => {
         const values: Record<string, string> = {
@@ -67,6 +120,7 @@ describe("AuthService", () => {
           JWT_REFRESH_SECRET: "refresh-secret",
           JWT_ACCESS_EXPIRES_IN: "15m",
           JWT_REFRESH_EXPIRES_IN: "7d",
+          MFA_ISSUER: "LogiSense",
         };
         return values[key];
       }),
@@ -76,6 +130,8 @@ describe("AuthService", () => {
       prisma as unknown as PrismaService,
       jwtService as unknown as JwtService,
       configService as unknown as ConfigService,
+      redis as unknown as RedisService,
+      mfaService as unknown as MfaService,
     );
 
     prisma.refreshToken.create.mockResolvedValue({ id: "refresh-row-1" });
@@ -148,14 +204,35 @@ describe("AuthService", () => {
       prisma.user.findUnique.mockResolvedValue(baseUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
-      const result = await service.login({
+      const result = (await service.login({
         tenantSlug: "acme",
         email: "ana@example.com",
         password: "supersecret",
-      });
+      })) as AuthResult;
 
       expect(result.user.id).toBe(baseUser.id);
       expect(lastAuditAction()).toBe(AuditAction.LOGIN_SUCCESS);
+    });
+
+    it("retorna mfaRequired quando o usuário tem MFA habilitado", async () => {
+      prisma.tenant.findUnique.mockResolvedValue({
+        id: "tenant-1",
+        slug: "acme",
+      });
+      prisma.user.findUnique.mockResolvedValue({
+        ...baseUser,
+        mfaEnabled: true,
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      const result = (await service.login({
+        tenantSlug: "acme",
+        email: "ana@example.com",
+        password: "supersecret",
+      })) as MfaRequiredResult;
+
+      expect(result.mfaRequired).toBe(true);
+      expect(result.mfaToken).toBe("signed-token");
     });
 
     it("rejeita quando o tenant não existe", async () => {
@@ -205,6 +282,293 @@ describe("AuthService", () => {
       ).rejects.toBeInstanceOf(UnauthorizedException);
 
       expect(lastAuditAction()).toBe(AuditAction.LOGIN_FAILED);
+    });
+
+    it("rejeita quando a conta é apenas OAuth (sem passwordHash)", async () => {
+      prisma.tenant.findUnique.mockResolvedValue({
+        id: "tenant-1",
+        slug: "acme",
+      });
+      prisma.user.findUnique.mockResolvedValue({
+        ...baseUser,
+        passwordHash: null,
+      });
+
+      await expect(
+        service.login({
+          tenantSlug: "acme",
+          email: "ana@example.com",
+          password: "qualquer",
+        }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+
+      expect(lastAuditAction()).toBe(AuditAction.LOGIN_FAILED);
+    });
+  });
+
+  describe("handleOAuthLogin", () => {
+    const profile = {
+      provider: OAuthProvider.GOOGLE,
+      providerAccountId: "google-123",
+      email: "nova@example.com",
+      name: "Nova Usuária",
+    };
+
+    it("reaproveita usuário existente vinculado à conta OAuth", async () => {
+      prisma.oAuthAccount.findUnique.mockResolvedValue({
+        user: baseUser,
+      });
+
+      const result = (await service.handleOAuthLogin(profile)) as AuthResult;
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(result.user.id).toBe(baseUser.id);
+      expect(lastAuditAction()).toBe(AuditAction.OAUTH_LOGIN);
+    });
+
+    it("cria tenant + usuário owner no primeiro acesso via OAuth", async () => {
+      prisma.oAuthAccount.findUnique.mockResolvedValue(null);
+      const createdUser = {
+        ...baseUser,
+        id: "user-2",
+        email: profile.email,
+        passwordHash: null,
+      };
+      prisma.tenant.create.mockResolvedValue({ id: "tenant-2" });
+      prisma.user.create.mockResolvedValue(createdUser);
+      prisma.oAuthAccount.create.mockResolvedValue({});
+
+      type TxCallback = (tx: {
+        tenant: { create: typeof prisma.tenant.create };
+        user: { create: typeof prisma.user.create };
+        oAuthAccount: { create: typeof prisma.oAuthAccount.create };
+      }) => Promise<typeof createdUser>;
+      prisma.$transaction.mockImplementation((callback: TxCallback) =>
+        callback({
+          tenant: { create: prisma.tenant.create },
+          user: { create: prisma.user.create },
+          oAuthAccount: { create: prisma.oAuthAccount.create },
+        }),
+      );
+
+      const result = (await service.handleOAuthLogin(profile)) as AuthResult;
+
+      const tenantCalls = prisma.tenant.create.mock.calls as Array<
+        [{ data: { name: string } }]
+      >;
+      expect(tenantCalls[0][0].data.name).toBe(profile.name);
+
+      const oauthAccountCalls = prisma.oAuthAccount.create.mock.calls as Array<
+        [{ data: { provider: string; providerAccountId: string } }]
+      >;
+      expect(oauthAccountCalls[0][0].data.provider).toBe(profile.provider);
+      expect(oauthAccountCalls[0][0].data.providerAccountId).toBe(
+        profile.providerAccountId,
+      );
+      expect(result.user.email).toBe(profile.email);
+      expect(lastAuditAction()).toBe(AuditAction.OAUTH_LOGIN);
+    });
+
+    it("rejeita quando o usuário vinculado está inativo", async () => {
+      prisma.oAuthAccount.findUnique.mockResolvedValue({
+        user: { ...baseUser, status: UserStatus.DISABLED },
+      });
+
+      await expect(service.handleOAuthLogin(profile)).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+    });
+  });
+
+  describe("troca de código OAuth (Redis)", () => {
+    it("cria e consome um código de troca uma única vez", async () => {
+      const outcome: AuthResult = {
+        accessToken: "a",
+        refreshToken: "b",
+        user: {
+          id: baseUser.id,
+          tenantId: baseUser.tenantId,
+          name: baseUser.name,
+          email: baseUser.email,
+          role: baseUser.role,
+          mfaEnabled: baseUser.mfaEnabled,
+        },
+      };
+
+      const code = await service.createOAuthExchangeCode(outcome);
+      expect(redis.set).toHaveBeenCalledWith(
+        expect.stringContaining("oauth-exchange:"),
+        JSON.stringify(outcome),
+        "EX",
+        60,
+      );
+
+      redis.get.mockResolvedValue(JSON.stringify(outcome));
+      const consumed = await service.consumeOAuthExchangeCode(code);
+      expect(consumed).toEqual(outcome);
+      expect(redis.del).toHaveBeenCalled();
+    });
+
+    it("rejeita um código inexistente ou expirado", async () => {
+      redis.get.mockResolvedValue(null);
+
+      await expect(
+        service.consumeOAuthExchangeCode("invalido"),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+  });
+
+  describe("verifyMfa", () => {
+    const mfaPayload = { sub: baseUser.id, type: "mfa" as const };
+
+    it("emite tokens quando o TOTP é válido", async () => {
+      jwtService.verifyAsync.mockResolvedValue(mfaPayload);
+      prisma.user.findUnique.mockResolvedValue({
+        ...baseUser,
+        mfaEnabled: true,
+        mfaSecret: "MFASECRET",
+      });
+      mfaService.verifyToken.mockReturnValue(true);
+
+      const result = await service.verifyMfa("mfa-token", "123456");
+
+      expect(result.user.id).toBe(baseUser.id);
+      expect(lastAuditAction()).toBe(AuditAction.LOGIN_SUCCESS);
+    });
+
+    it("aceita um código de backup válido quando o TOTP falha", async () => {
+      jwtService.verifyAsync.mockResolvedValue(mfaPayload);
+      prisma.user.findUnique.mockResolvedValue({
+        ...baseUser,
+        mfaEnabled: true,
+        mfaSecret: "MFASECRET",
+        mfaBackupCodes: [{ codeHash: "hash1", usedAt: null }],
+      });
+      mfaService.verifyToken.mockReturnValue(false);
+      mfaService.consumeBackupCode.mockReturnValue({
+        valid: true,
+        updatedCodes: [{ codeHash: "hash1", usedAt: new Date().toISOString() }],
+      });
+
+      const result = await service.verifyMfa("mfa-token", "backup-code");
+
+      expect(result.user.id).toBe(baseUser.id);
+      expect(prisma.user.update).toHaveBeenCalled();
+      expect(lastAuditAction()).toBe(AuditAction.LOGIN_SUCCESS);
+    });
+
+    it("rejeita e audita quando TOTP e backup code são inválidos", async () => {
+      jwtService.verifyAsync.mockResolvedValue(mfaPayload);
+      prisma.user.findUnique.mockResolvedValue({
+        ...baseUser,
+        mfaEnabled: true,
+        mfaSecret: "MFASECRET",
+      });
+      mfaService.verifyToken.mockReturnValue(false);
+      mfaService.consumeBackupCode.mockReturnValue({
+        valid: false,
+        updatedCodes: [],
+      });
+
+      await expect(
+        service.verifyMfa("mfa-token", "000000"),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(lastAuditAction()).toBe(AuditAction.MFA_VERIFY_FAILED);
+    });
+
+    it("rejeita quando o mfaToken é inválido", async () => {
+      jwtService.verifyAsync.mockRejectedValue(new Error("bad token"));
+
+      await expect(
+        service.verifyMfa("token-invalido", "123456"),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+  });
+
+  describe("setupMfa / enableMfa / disableMfa", () => {
+    it("gera secret + otpauth url + QR code no setup", async () => {
+      prisma.user.findUniqueOrThrow.mockResolvedValue(baseUser);
+
+      const result = await service.setupMfa(baseUser.id);
+
+      expect(result.secret).toBe("MFASECRET");
+      expect(result.qrCodeDataUrl).toContain("data:image/png;base64");
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { mfaSecret: "MFASECRET" },
+        }),
+      );
+    });
+
+    it("habilita MFA e retorna backup codes quando o código é válido", async () => {
+      prisma.user.findUniqueOrThrow.mockResolvedValue({
+        ...baseUser,
+        mfaSecret: "MFASECRET",
+      });
+      mfaService.verifyToken.mockReturnValue(true);
+
+      const result = await service.enableMfa(baseUser.id, "123456");
+
+      expect(result.backupCodes).toEqual(["code1", "code2"]);
+      expect(lastAuditAction()).toBe(AuditAction.MFA_ENABLED);
+    });
+
+    it("rejeita habilitar MFA com código inválido", async () => {
+      prisma.user.findUniqueOrThrow.mockResolvedValue({
+        ...baseUser,
+        mfaSecret: "MFASECRET",
+      });
+      mfaService.verifyToken.mockReturnValue(false);
+
+      await expect(
+        service.enableMfa(baseUser.id, "000000"),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it("desabilita MFA com senha correta", async () => {
+      prisma.user.findUniqueOrThrow.mockResolvedValue({
+        ...baseUser,
+        mfaEnabled: true,
+        mfaSecret: "MFASECRET",
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await service.disableMfa(baseUser.id, { password: "supersecret" });
+
+      const updateCalls = prisma.user.update.mock.calls as Array<
+        [{ data: { mfaEnabled: boolean; mfaSecret: string | null } }]
+      >;
+      expect(updateCalls[0][0].data.mfaEnabled).toBe(false);
+      expect(updateCalls[0][0].data.mfaSecret).toBeNull();
+      expect(lastAuditAction()).toBe(AuditAction.MFA_DISABLED);
+    });
+
+    it("desabilita MFA com TOTP válido quando não há senha (conta OAuth)", async () => {
+      prisma.user.findUniqueOrThrow.mockResolvedValue({
+        ...baseUser,
+        passwordHash: null,
+        mfaEnabled: true,
+        mfaSecret: "MFASECRET",
+      });
+      mfaService.verifyToken.mockReturnValue(true);
+
+      await service.disableMfa(baseUser.id, { code: "123456" });
+
+      expect(lastAuditAction()).toBe(AuditAction.MFA_DISABLED);
+    });
+
+    it("rejeita desabilitar MFA sem senha nem código válidos", async () => {
+      prisma.user.findUniqueOrThrow.mockResolvedValue({
+        ...baseUser,
+        mfaEnabled: true,
+        mfaSecret: "MFASECRET",
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+      mfaService.verifyToken.mockReturnValue(false);
+
+      await expect(
+        service.disableMfa(baseUser.id, { password: "errada" }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
     });
   });
 

@@ -15,6 +15,7 @@ interface AuthUser {
   name: string;
   email: string;
   role: string;
+  mfaEnabled: boolean;
 }
 
 interface StoredSession {
@@ -23,10 +24,27 @@ interface StoredSession {
   refreshToken: string;
 }
 
-interface LoginResult {
+export interface AuthResult {
   accessToken: string;
   refreshToken: string;
   user: AuthUser;
+}
+
+export interface MfaRequiredResult {
+  mfaRequired: true;
+  mfaToken: string;
+}
+
+export type LoginOutcome = AuthResult | MfaRequiredResult;
+
+export interface MfaSetupResult {
+  secret: string;
+  otpAuthUrl: string;
+  qrCodeDataUrl: string;
+}
+
+export interface MfaEnableResult {
+  backupCodes: string[];
 }
 
 interface AuthContextValue {
@@ -36,6 +54,14 @@ interface AuthContextValue {
     tenantSlug: string;
     email: string;
     password: string;
+  }) => Promise<LoginOutcome>;
+  verifyMfa: (params: { mfaToken: string; code: string }) => Promise<void>;
+  exchangeOAuthCode: (code: string) => Promise<LoginOutcome>;
+  setupMfa: () => Promise<MfaSetupResult>;
+  enableMfa: (code: string) => Promise<MfaEnableResult>;
+  disableMfa: (credential: {
+    password?: string;
+    code?: string;
   }) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -85,6 +111,17 @@ function subscribe(listener: Listener): () => void {
   return () => listeners.delete(listener);
 }
 
+function applyLoginOutcome(outcome: LoginOutcome): LoginOutcome {
+  if (!("mfaRequired" in outcome)) {
+    setSession({
+      user: outcome.user,
+      accessToken: outcome.accessToken,
+      refreshToken: outcome.refreshToken,
+    });
+  }
+  return outcome;
+}
+
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -96,15 +133,70 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(
     async (params: { tenantSlug: string; email: string; password: string }) => {
-      const result = await apiFetch<LoginResult>("/auth/login", {
+      const result = await apiFetch<LoginOutcome>("/auth/login", {
         method: "POST",
         body: params,
       });
+      return applyLoginOutcome(result);
+    },
+    [],
+  );
 
+  const verifyMfa = useCallback(
+    async (params: { mfaToken: string; code: string }) => {
+      const result = await apiFetch<AuthResult>("/auth/mfa/verify", {
+        method: "POST",
+        body: params,
+      });
+      applyLoginOutcome(result);
+    },
+    [],
+  );
+
+  const exchangeOAuthCode = useCallback(async (code: string) => {
+    const result = await apiFetch<LoginOutcome>("/auth/oauth/exchange", {
+      method: "POST",
+      body: { code },
+    });
+    return applyLoginOutcome(result);
+  }, []);
+
+  const setupMfa = useCallback(async () => {
+    const current = getSnapshot();
+    if (!current) throw new Error("Não autenticado");
+    return apiFetch<MfaSetupResult>("/auth/mfa/setup", {
+      method: "POST",
+      token: current.accessToken,
+    });
+  }, []);
+
+  const enableMfa = useCallback(async (code: string) => {
+    const current = getSnapshot();
+    if (!current) throw new Error("Não autenticado");
+    const result = await apiFetch<MfaEnableResult>("/auth/mfa/enable", {
+      method: "POST",
+      token: current.accessToken,
+      body: { code },
+    });
+    setSession({
+      ...current,
+      user: { ...current.user, mfaEnabled: true },
+    });
+    return result;
+  }, []);
+
+  const disableMfa = useCallback(
+    async (credential: { password?: string; code?: string }) => {
+      const current = getSnapshot();
+      if (!current) throw new Error("Não autenticado");
+      await apiFetch("/auth/mfa/disable", {
+        method: "POST",
+        token: current.accessToken,
+        body: credential,
+      });
       setSession({
-        user: result.user,
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
+        ...current,
+        user: { ...current.user, mfaEnabled: false },
       });
     },
     [],
@@ -128,9 +220,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user: session?.user ?? null,
       accessToken: session?.accessToken ?? null,
       login,
+      verifyMfa,
+      exchangeOAuthCode,
+      setupMfa,
+      enableMfa,
+      disableMfa,
       logout,
     }),
-    [session, login, logout],
+    [
+      session,
+      login,
+      verifyMfa,
+      exchangeOAuthCode,
+      setupMfa,
+      enableMfa,
+      disableMfa,
+      logout,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

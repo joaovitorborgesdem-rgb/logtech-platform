@@ -19,6 +19,15 @@ Legenda: `[x]` feito · `[ ]` pendente
 - [x] Guards de rota (`JwtAuthGuard`, `RolesGuard`)
 - [ ] Recuperação/reset de senha (envio de e-mail)
 - [x] Hash de senha (bcrypt) e políticas de força (mínimo 8 caracteres)
+- [x] Login social (Google/GitHub via Passport, `passport-google-oauth20`/
+      `passport-github2`) com criação automática de tenant + usuário `OWNER`
+      no primeiro acesso; troca do resultado do login por um código de uso
+      único via Redis (`POST /auth/oauth/exchange`) — ver ADR-020
+- [x] MFA/TOTP (`otplib`) — setup com QR code (`POST /auth/mfa/setup`),
+      habilitação com backup codes (`POST /auth/mfa/enable`), verificação
+      no login (`POST /auth/mfa/verify`) e desabilitação (`POST
+      /auth/mfa/disable`); frontend em `/settings/security` e `/mfa/verify`
+      — ver ADR-020
 
 ## 2. Multi-tenancy
 - [x] Modelagem `Tenant`/`Organization` no Prisma

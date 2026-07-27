@@ -68,6 +68,16 @@ healthcheck, ou funcionar com dados/URLs errados:
      `OTEL_SERVICE_NAME`.
    - Decidir e apontar `S3_*` pro storage real de produção (AWS S3 ou outro
      S3-compatible) — o default é o MinIO de dev, que não existe em prod.
+   - Login social e MFA (Fase 1, ver ADR-020): `GOOGLE_CLIENT_ID`,
+     `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL`, `GITHUB_CLIENT_ID`,
+     `GITHUB_CLIENT_SECRET`, `GITHUB_CALLBACK_URL` têm default
+     `"not-configured"` (o boot não quebra sem eles, mas `/auth/google` e
+     `/auth/github` falham na troca com o provedor) — sobrescrever com as
+     credenciais reais de cada ambiente antes de expor os botões de login
+     social no `web`. `WEB_URL` (base do frontend, usado no redirect final
+     do OAuth) e `MFA_ISSUER` (nome exibido no app autenticador) também têm
+     default de dev — sobrescrever `WEB_URL` pro domínio real do `web` em
+     cada ambiente.
 3. **Env vars do serviço `web`**, por ambiente: `NEXT_PUBLIC_API_URL`,
    `NEXT_PUBLIC_SITE_URL` (apontando pro domínio real de cada ambiente).
 4. **Checar deploy duplicado**: os serviços foram conectados direto ao

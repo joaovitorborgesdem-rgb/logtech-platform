@@ -1167,3 +1167,102 @@ Railway/ambiente em runtime pro `prisma migrate deploy`.
   problema de segredo do ADR-018.
 - Tornar `datasource.url` opcional em `prisma.config.ts` — mexeria em
   comportamento de dev/test também, não só do build de produção.
+
+## ADR-020: OAuth (Google/GitHub) e MFA/TOTP
+
+**Status:** Aceito
+
+### Contexto
+
+Login social (Google/GitHub) e MFA por app autenticador foram adicionados à
+Fase 1 (Autenticação). O fluxo de login existente é JSON puro (`POST
+/auth/login` → tokens), mas OAuth2 authorization-code exige redirects de
+página inteira via navegador — os dois fluxos precisavam convergir num
+mesmo formato de resposta para o frontend não duplicar lógica de sessão.
+
+### Criação automática de tenant no primeiro acesso via OAuth
+
+`AuthService.handleOAuthLogin` busca um `OAuthAccount` existente
+(`provider` + `providerAccountId`, único). Se não existir, cria — numa
+única transação — um novo `Tenant`, um `User` (`role: OWNER`, sem
+`passwordHash`) e o `OAuthAccount` vinculado. Não há tentativa de vincular
+a conta OAuth a um `User` já existente pelo e-mail: e-mail não é uma prova
+de identidade confiável o bastante para linkar contas automaticamente
+(risco de account takeover se o provedor OAuth não verificar e-mail com o
+mesmo rigor). Cada identidade OAuth nova sempre vira um tenant novo,
+mesmo que o e-mail já exista em outro tenant local.
+
+`User.passwordHash` virou `String?` (era obrigatório) para acomodar contas
+só-OAuth. `login()` (usuário/senha) agora rejeita explicitamente com uma
+mensagem distinta quando `passwordHash` é nulo, em vez de cair no branch
+genérico de "credenciais inválidas".
+
+O slug do tenant criado é derivado do nome do perfil OAuth
+(normalizado, minúsculo, sem acentos) + um sufixo aleatório de 3 bytes em
+hex, sem checar colisão previamente contra `Tenant.slug` — a probabilidade
+de colisão é desprezível e evita uma query extra + retry loop. Diferente
+do `register()` com slug escolhido pelo usuário (que precisa de
+`ConflictException` explícita), aqui o slug é interno/gerado, então o
+usuário nunca vê nem escolhe esse valor diretamente.
+
+### Troca de resultado de login via código de uso único (Redis)
+
+O callback do OAuth (`GET /auth/:provider/callback`) roda num redirect de
+navegador, então não pode simplesmente devolver JSON com os tokens — e
+colocar tokens diretamente na URL de redirect pro frontend os exporia em
+histórico do navegador, logs de proxy/CDN e no header `Referer`. Em vez
+disso, o backend gera um código opaco aleatório (24 bytes hex), guarda o
+resultado do login (tokens ou `{mfaRequired, mfaToken}`) no Redis por 60s
+(`oauth-exchange:<code>`), e redireciona para
+`${WEB_URL}/oauth/callback?code=<code>`. O frontend troca esse código uma
+única vez via `POST /auth/oauth/exchange` (`AuthService.consumeOAuthExchangeCode`
+deleta a chave do Redis antes de retornar) — replay do mesmo código sempre
+falha.
+
+### Gate de MFA como um segundo token de curto prazo, não um segundo request bloqueante
+
+Quando `user.mfaEnabled`, tanto `login()` quanto `handleOAuthLogin()`
+(via `buildLoginOutcome`) não emitem os tokens finais — devolvem
+`{ mfaRequired: true, mfaToken }`, um JWT de 5 minutos (`type: "mfa"`,
+assinado com o mesmo `JWT_ACCESS_SECRET`) que só serve para o passo
+seguinte, `POST /auth/mfa/verify`. `JwtStrategy` rejeita esse token em
+rotas normais (checa `payload.type !== "access"`), então ele não pode ser
+usado como bearer token em nenhum endpoint protegido — só circula entre
+o passo 1 (senha ou OAuth válidos) e o passo 2 (código TOTP/backup).
+`LOGIN_SUCCESS` só é auditado quando o outcome final não exige MFA
+(`login()`) ou depois que `verifyMfa()` aceita o código — nunca no meio do
+gate, pra não registrar sucesso antes do segundo fator ser checado.
+
+### TOTP: `otplib@12`, não a v13 atual
+
+A dependência foi fixada em `otplib@^12.0.1` (API clássica
+`authenticator.generateSecret/keyuri/verify`) em vez da v13 mais recente.
+A v13 é uma reescrita ESM-first: o build CJS transpilado ainda faz
+`require()` de `@scure/base` (dependência transitiva de
+`@otplib/plugin-base32-scure`), que é puro ESM sem fallback CJS. Isso
+funciona em Node 24 puro (`require(esm)` nativo), mas quebra dentro do
+Jest — que intercepta `require` com seu próprio module registry e não
+aplica esse interop, gerando `SyntaxError: Unexpected token 'export'` ao
+carregar qualquer teste que importe o serviço de MFA. `otplib@12` é CJS
+puro e não tem esse problema em nenhum dos dois ambientes.
+
+### Backup codes hasheados, secret TOTP em texto plano
+
+`User.mfaBackupCodes` (Json) guarda um array de `{ codeHash, usedAt }` —
+o hash (SHA-256) do código, nunca o valor em texto plano, e `usedAt` marca
+consumo (cada código só funciona uma vez). Já `User.mfaSecret` (o secret
+TOTP em si) é guardado em texto plano — **limitação conhecida**: o ideal
+seria cifrá-lo em repouso (ex.: `libsodium`/KMS), mas isso exigiria uma
+chave de criptografia própria gerenciada fora do banco, o que não existe
+ainda nesta fase. Revisitar se/quando a plataforma ganhar um serviço de
+secrets dedicado.
+
+### Rejeitado
+
+- Vincular automaticamente uma conta OAuth a um `User` existente pelo
+  e-mail — ver risco de account takeover acima.
+- Tokens do resultado de login direto na query string do redirect OAuth —
+  troca por código de uso único via Redis evita esse vazamento.
+- `otplib@13` — quebra em Jest por causa da cadeia CJS→ESM de
+  `@scure/base` (ver acima); reavaliar se uma versão futura resolver o
+  interop ou se o projeto migrar os testes pra um runner nativamente ESM.

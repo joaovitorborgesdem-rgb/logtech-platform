@@ -20,7 +20,13 @@ export default function LoginPage() {
     setIsSubmitting(true);
 
     try {
-      await login({ tenantSlug, email, password });
+      const result = await login({ tenantSlug, email, password });
+      if ("mfaRequired" in result) {
+        router.push(
+          `/mfa/verify?mfaToken=${encodeURIComponent(result.mfaToken)}`,
+        );
+        return;
+      }
       router.push("/freight-quotes/new");
     } catch (err) {
       setError(
@@ -30,6 +36,8 @@ export default function LoginPage() {
       setIsSubmitting(false);
     }
   }
+
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
 
   return (
     <div className="flex flex-1 items-center justify-center bg-zinc-50 px-4 dark:bg-black">
@@ -100,6 +108,25 @@ export default function LoginPage() {
         >
           {isSubmitting ? "Entrando..." : "Entrar"}
         </button>
+
+        <div className="my-4 flex items-center gap-3">
+          <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">ou</span>
+          <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+        </div>
+
+        <a
+          href={`${apiUrl}/auth/google`}
+          className="mb-2 flex w-full items-center justify-center rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-50 dark:hover:bg-zinc-900"
+        >
+          Continuar com Google
+        </a>
+        <a
+          href={`${apiUrl}/auth/github`}
+          className="flex w-full items-center justify-center rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-50 dark:hover:bg-zinc-900"
+        >
+          Continuar com GitHub
+        </a>
       </form>
     </div>
   );

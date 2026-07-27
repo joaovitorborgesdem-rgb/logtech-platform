@@ -14,6 +14,11 @@ export interface RefreshTokenPayload {
   type: "refresh";
 }
 
+export interface MfaTokenPayload {
+  sub: string;
+  type: "mfa";
+}
+
 export interface AuthenticatedUser {
   id: string;
   tenantId: string;
