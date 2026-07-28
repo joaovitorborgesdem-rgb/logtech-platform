@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { KeyboardEvent, useState } from "react";
 import { ApiError, apiFetch } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 
@@ -28,8 +28,7 @@ export function CepSearch({ label, onSelect }: CepSearchProps) {
   const [error, setError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
 
-  async function handleSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleSearch() {
     setError(null);
     setIsSearching(true);
     setResults([]);
@@ -52,6 +51,12 @@ export function CepSearch({ label, onSelect }: CepSearchProps) {
     }
   }
 
+  function handleFieldKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    void handleSearch();
+  }
+
   return (
     <div className="mt-2">
       <button
@@ -64,43 +69,43 @@ export function CepSearch({ label, onSelect }: CepSearchProps) {
 
       {isOpen && (
         <div className="mt-3 rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
-          <form
-            onSubmit={handleSearch}
-            className="grid grid-cols-1 gap-3 sm:grid-cols-4"
-          >
+          {/* Not a <form>: this widget lives inside the freight-quote page's
+              own <form>, and nested <form> elements are invalid HTML. */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
             <input
               type="text"
-              required
               placeholder="UF"
               maxLength={2}
               value={uf}
               onChange={(event) => setUf(event.target.value.toUpperCase())}
+              onKeyDown={handleFieldKeyDown}
               className="rounded-md border border-zinc-300 px-3 py-2 text-sm uppercase dark:border-zinc-700 dark:bg-zinc-900"
             />
             <input
               type="text"
-              required
               placeholder="Cidade"
               value={city}
               onChange={(event) => setCity(event.target.value)}
+              onKeyDown={handleFieldKeyDown}
               className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 sm:col-span-1"
             />
             <input
               type="text"
-              required
               placeholder="Logradouro"
               value={street}
               onChange={(event) => setStreet(event.target.value)}
+              onKeyDown={handleFieldKeyDown}
               className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 sm:col-span-1"
             />
             <button
-              type="submit"
-              disabled={isSearching}
+              type="button"
+              disabled={isSearching || !uf || !city || !street}
+              onClick={() => void handleSearch()}
               className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
             >
               {isSearching ? "Buscando..." : "Buscar"}
             </button>
-          </form>
+          </div>
 
           {error && (
             <p className="mt-3 text-sm text-red-600 dark:text-red-400">
