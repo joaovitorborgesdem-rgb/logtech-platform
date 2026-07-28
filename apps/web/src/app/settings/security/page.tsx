@@ -6,7 +6,7 @@ import { ApiError } from "@/lib/api-client";
 import { MfaSetupResult, useAuth } from "@/lib/auth-context";
 
 export default function SecuritySettingsPage() {
-  const { user, setupMfa, enableMfa, disableMfa } = useAuth();
+  const { user, initialized, setupMfa, enableMfa, disableMfa } = useAuth();
   const router = useRouter();
 
   const [setup, setSetup] = useState<MfaSetupResult | null>(null);
@@ -17,10 +17,10 @@ export default function SecuritySettingsPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!user) {
+    if (initialized && !user) {
       router.push("/login");
     }
-  }, [user, router]);
+  }, [initialized, user, router]);
 
   async function handleStartSetup() {
     setError(null);

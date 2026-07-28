@@ -332,17 +332,17 @@ function TrendChart({ data }: { data: { date: string; count: number }[] }) {
 }
 
 export default function DashboardPage() {
-  const { user, accessToken } = useAuth();
+  const { user, accessToken, initialized } = useAuth();
   const router = useRouter();
 
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) {
+    if (initialized && !user) {
       router.push("/login");
     }
-  }, [user, router]);
+  }, [initialized, user, router]);
 
   useEffect(() => {
     if (!accessToken) return;

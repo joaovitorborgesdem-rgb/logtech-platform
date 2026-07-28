@@ -8,21 +8,15 @@ import {
   useSyncExternalStore,
 } from "react";
 import { apiFetch } from "./api-client";
+import {
+  getServerSnapshot,
+  getSnapshot,
+  setSession,
+  StoredAuthUser,
+  subscribeSession,
+} from "./session-store";
 
-interface AuthUser {
-  id: string;
-  tenantId: string;
-  name: string;
-  email: string;
-  role: string;
-  mfaEnabled: boolean;
-}
-
-interface StoredSession {
-  user: AuthUser;
-  accessToken: string;
-  refreshToken: string;
-}
+type AuthUser = StoredAuthUser;
 
 export interface AuthResult {
   accessToken: string;
@@ -50,6 +44,7 @@ export interface MfaEnableResult {
 interface AuthContextValue {
   user: AuthUser | null;
   accessToken: string | null;
+  initialized: boolean;
   login: (params: {
     tenantSlug: string;
     email: string;
@@ -64,51 +59,6 @@ interface AuthContextValue {
     code?: string;
   }) => Promise<void>;
   logout: () => Promise<void>;
-}
-
-const STORAGE_KEY = "logisense.auth";
-
-type Listener = () => void;
-const listeners = new Set<Listener>();
-let cachedSnapshot: StoredSession | null | undefined;
-
-function readSession(): StoredSession | null {
-  if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as StoredSession;
-  } catch {
-    return null;
-  }
-}
-
-function getSnapshot(): StoredSession | null {
-  if (cachedSnapshot === undefined) {
-    cachedSnapshot = readSession();
-  }
-  return cachedSnapshot;
-}
-
-function getServerSnapshot(): StoredSession | null {
-  return null;
-}
-
-function setSession(session: StoredSession | null): void {
-  cachedSnapshot = session;
-  if (typeof window !== "undefined") {
-    if (session) {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
-    } else {
-      window.localStorage.removeItem(STORAGE_KEY);
-    }
-  }
-  listeners.forEach((listener) => listener());
-}
-
-function subscribe(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
 }
 
 function applyLoginOutcome(outcome: LoginOutcome): LoginOutcome {
@@ -126,9 +76,19 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const session = useSyncExternalStore(
-    subscribe,
+    subscribeSession,
     getSnapshot,
     getServerSnapshot,
+  );
+
+  // getServerSnapshot() always returns null (no session on the server), so
+  // every fresh page load briefly hydrates with session=null even when a
+  // valid session sits in localStorage. Callers must wait for this to flip
+  // to true before treating a null user as "logged out".
+  const initialized = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
   );
 
   const login = useCallback(
@@ -219,6 +179,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({
       user: session?.user ?? null,
       accessToken: session?.accessToken ?? null,
+      initialized,
       login,
       verifyMfa,
       exchangeOAuthCode,
@@ -229,6 +190,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       session,
+      initialized,
       login,
       verifyMfa,
       exchangeOAuthCode,

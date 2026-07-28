@@ -30,7 +30,7 @@ interface FreightQuote {
 }
 
 export default function NewFreightQuotePage() {
-  const { user, accessToken } = useAuth();
+  const { user, accessToken, initialized } = useAuth();
   const router = useRouter();
 
   const [originZipCode, setOriginZipCode] = useState("");
@@ -45,10 +45,10 @@ export default function NewFreightQuotePage() {
   const [createdQuote, setCreatedQuote] = useState<FreightQuote | null>(null);
 
   useEffect(() => {
-    if (!user) {
+    if (initialized && !user) {
       router.push("/login");
     }
-  }, [user, router]);
+  }, [initialized, user, router]);
 
   useEffect(() => {
     if (!createdQuote || !accessToken) {

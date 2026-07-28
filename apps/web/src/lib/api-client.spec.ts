@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiFetch, ApiError } from "./api-client";
+import { getSnapshot, setSession } from "./session-store";
 
 function mockFetchResponse(
   body: unknown,
@@ -14,6 +15,23 @@ function mockFetchResponse(
       json: () => Promise.resolve(body),
     }),
   );
+}
+
+const fakeUser = {
+  id: "user-1",
+  tenantId: "tenant-1",
+  name: "Owner",
+  email: "owner@example.com",
+  role: "OWNER",
+  mfaEnabled: false,
+};
+
+function jsonResponse(status: number, body: unknown) {
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    json: () => Promise.resolve(body),
+  };
 }
 
 describe("apiFetch", () => {
@@ -74,5 +92,123 @@ describe("apiFetch", () => {
     await expect(apiFetch("/carriers")).rejects.toMatchObject({
       message: "Erro inesperado ao comunicar com a API",
     });
+  });
+});
+
+describe("apiFetch — renovação de token em respostas 401", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+  });
+
+  it("renova o access token e repete a chamada original após um 401", async () => {
+    setSession({
+      user: fakeUser,
+      accessToken: "expired-token",
+      refreshToken: "refresh-token-1",
+    });
+
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/auth/refresh")) {
+        expect(JSON.parse(init?.body as string)).toEqual({
+          refreshToken: "refresh-token-1",
+        });
+        return jsonResponse(200, {
+          accessToken: "new-token",
+          refreshToken: "refresh-token-2",
+        });
+      }
+      const authHeader = (init?.headers as Record<string, string>)
+        .Authorization;
+      if (authHeader === "Bearer expired-token") {
+        return jsonResponse(401, { message: "Unauthorized" });
+      }
+      if (authHeader === "Bearer new-token") {
+        return jsonResponse(200, { ok: true });
+      }
+      throw new Error(`unexpected call: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await apiFetch<{ ok: boolean }>("/dashboard/metrics", {
+      token: "expired-token",
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(getSnapshot()?.accessToken).toBe("new-token");
+  });
+
+  it("limpa a sessão e propaga o 401 quando o refresh token também é inválido", async () => {
+    setSession({
+      user: fakeUser,
+      accessToken: "expired-token",
+      refreshToken: "revoked-refresh-token",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/auth/refresh")) {
+          return jsonResponse(401, { message: "Refresh token inválido" });
+        }
+        return jsonResponse(401, { message: "Unauthorized" });
+      }),
+    );
+
+    await expect(
+      apiFetch("/dashboard/metrics", { token: "expired-token" }),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(getSnapshot()).toBeNull();
+  });
+
+  it("não tenta renovar quando a chamada é anônima (sem token)", async () => {
+    mockFetchResponse({ message: "Unauthorized" }, { status: 401, ok: false });
+
+    await expect(apiFetch("/dashboard/metrics")).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("compartilha um único refresh entre chamadas 401 concorrentes", async () => {
+    setSession({
+      user: fakeUser,
+      accessToken: "expired-token",
+      refreshToken: "refresh-token-1",
+    });
+
+    let refreshCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/auth/refresh")) {
+          refreshCalls += 1;
+          return jsonResponse(200, {
+            accessToken: "new-token",
+            refreshToken: "refresh-token-2",
+          });
+        }
+        const authHeader = (init?.headers as Record<string, string>)
+          .Authorization;
+        if (authHeader === "Bearer expired-token") {
+          return jsonResponse(401, { message: "Unauthorized" });
+        }
+        return jsonResponse(200, { ok: true });
+      }),
+    );
+
+    const [first, second] = await Promise.all([
+      apiFetch<{ ok: boolean }>("/dashboard/metrics", {
+        token: "expired-token",
+      }),
+      apiFetch<{ ok: boolean }>("/freight-quotes", {
+        token: "expired-token",
+      }),
+    ]);
+
+    expect(first).toEqual({ ok: true });
+    expect(second).toEqual({ ok: true });
+    expect(refreshCalls).toBe(1);
   });
 });
