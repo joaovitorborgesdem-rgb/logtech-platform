@@ -55,14 +55,31 @@ export default function NewFreightQuotePage() {
       return;
     }
 
+    const quoteId = createdQuote.id;
+    let cancelled = false;
+
+    // The calculation worker can finish (and emit "freight-quote.updated")
+    // before the socket below finishes its handshake + tenant-room join —
+    // Socket.IO does not buffer room events for late joiners, so that
+    // update would otherwise be lost forever. Reconcile with a direct fetch
+    // in parallel so a fast worker can never leave this screen stuck.
+    apiFetch<FreightQuote>(`/freight-quotes/${quoteId}`, {
+      token: accessToken,
+    })
+      .then((quote) => {
+        if (!cancelled) setCreatedQuote(quote);
+      })
+      .catch(() => undefined);
+
     const socket = createRealtimeSocket(accessToken);
     socket.on("freight-quote.updated", (updated: FreightQuote) => {
-      if (updated.id === createdQuote.id) {
+      if (updated.id === quoteId) {
         setCreatedQuote(updated);
       }
     });
 
     return () => {
+      cancelled = true;
       socket.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
