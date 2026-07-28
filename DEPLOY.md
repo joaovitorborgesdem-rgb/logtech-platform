@@ -34,6 +34,34 @@
   e `api-production-4091.up.railway.app`, com `database`, `redis` e as
   duas filas BullMQ (`freight-quote-queue`, `insights-queue`) todos `up`.
 
+## Limitação conhecida: busca de CEP por endereço pode falhar em produção
+
+`GET /integrations/viacep/search` (busca por UF/cidade/logradouro, usada
+na tela de simulação de frete) pode retornar `502` intermitentemente **só
+em produção** — confirmado em 2026-07-28: o mesmo código funciona normal
+em `staging`, o `viacep.com.br` está no ar (responde `200` direto), e
+outra integração externa no mesmo container (`GET /integrations/cnpj/:cnpj`,
+via BrasilAPI) funciona normal em produção. Ou seja, não é bug de código
+nem indisponibilidade geral — é o `viacep.com.br` bloqueando ou limitando
+especificamente o IP de saída de produção do Railway, que é compartilhado
+entre clientes (tráfego de outro projeto no mesmo pool de IPs pode
+"contaminar" a reputação do IP pra todo mundo que sai por ele).
+
+- O circuit breaker (`ResilientHttpClient`, ver ADR-010) já evita
+  sobrecarregar o `viacep.com.br` quando isso acontece — abre depois de 5
+  falhas consecutivas e só tenta de novo depois de 30s.
+- **Não afeta**: o resto do sistema, a busca de CEP direto por código
+  (CEP → endereço, que é uma chamada diferente), nem `staging`.
+- Comportamento esperado até normalizar sozinho (blocks de IP
+  compartilhado costumam ser temporários) — decisão registrada em
+  2026-07-28: aguardar em vez de mudar código. Não existe fallback
+  simples: a BrasilAPI foi avaliada e só cobre CEP→endereço, não o sentido
+  contrário (endereço→CEP) que essa funcionalidade usa.
+- Se persistir por muito tempo, as opções são: procurar outro provedor
+  público que suporte busca por endereço (sem garantia de não sofrer o
+  mesmo bloqueio de IP), ou contratar IP de saída dedicado no Railway
+  (decisão de conta/billing, fora do que dá pra resolver via código).
+
 ## Status atual (2026-07-26)
 
 ### ✅ Validado — pipeline completo funcionando fim a fim
