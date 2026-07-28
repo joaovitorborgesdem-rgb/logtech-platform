@@ -39,7 +39,13 @@ describe("AuthService", () => {
     verifyAsync: jest.Mock;
     decode: jest.Mock;
   };
-  let redis: { set: jest.Mock; get: jest.Mock; del: jest.Mock };
+  let redis: {
+    set: jest.Mock;
+    get: jest.Mock;
+    del: jest.Mock;
+    incr: jest.Mock;
+    expire: jest.Mock;
+  };
   let mfaService: {
     generateSecret: jest.Mock;
     buildOtpAuthUrl: jest.Mock;
@@ -91,7 +97,13 @@ describe("AuthService", () => {
       }),
     };
 
-    redis = { set: jest.fn(), get: jest.fn(), del: jest.fn() };
+    redis = {
+      set: jest.fn(),
+      get: jest.fn(),
+      del: jest.fn(),
+      incr: jest.fn().mockResolvedValue(1),
+      expire: jest.fn(),
+    };
 
     mfaService = {
       generateSecret: jest.fn().mockReturnValue("MFASECRET"),
@@ -204,11 +216,14 @@ describe("AuthService", () => {
       prisma.user.findUnique.mockResolvedValue(baseUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
-      const result = (await service.login({
-        tenantSlug: "acme",
-        email: "ana@example.com",
-        password: "supersecret",
-      })) as AuthResult;
+      const result = (await service.login(
+        {
+          tenantSlug: "acme",
+          email: "ana@example.com",
+          password: "supersecret",
+        },
+        "203.0.113.10",
+      )) as AuthResult;
 
       expect(result.user.id).toBe(baseUser.id);
       expect(lastAuditAction()).toBe(AuditAction.LOGIN_SUCCESS);
@@ -225,11 +240,14 @@ describe("AuthService", () => {
       });
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
-      const result = (await service.login({
-        tenantSlug: "acme",
-        email: "ana@example.com",
-        password: "supersecret",
-      })) as MfaRequiredResult;
+      const result = (await service.login(
+        {
+          tenantSlug: "acme",
+          email: "ana@example.com",
+          password: "supersecret",
+        },
+        "203.0.113.10",
+      )) as MfaRequiredResult;
 
       expect(result.mfaRequired).toBe(true);
       expect(result.mfaToken).toBe("signed-token");
@@ -239,11 +257,14 @@ describe("AuthService", () => {
       prisma.tenant.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.login({
-          tenantSlug: "inexistente",
-          email: "ana@example.com",
-          password: "supersecret",
-        }),
+        service.login(
+          {
+            tenantSlug: "inexistente",
+            email: "ana@example.com",
+            password: "supersecret",
+          },
+          "203.0.113.10",
+        ),
       ).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
@@ -255,11 +276,14 @@ describe("AuthService", () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.login({
-          tenantSlug: "acme",
-          email: "desconhecido@example.com",
-          password: "supersecret",
-        }),
+        service.login(
+          {
+            tenantSlug: "acme",
+            email: "desconhecido@example.com",
+            password: "supersecret",
+          },
+          "203.0.113.10",
+        ),
       ).rejects.toBeInstanceOf(UnauthorizedException);
 
       expect(lastAuditAction()).toBe(AuditAction.LOGIN_FAILED);
@@ -274,14 +298,105 @@ describe("AuthService", () => {
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
       await expect(
-        service.login({
-          tenantSlug: "acme",
-          email: "ana@example.com",
-          password: "senha-errada",
-        }),
+        service.login(
+          {
+            tenantSlug: "acme",
+            email: "ana@example.com",
+            password: "senha-errada",
+          },
+          "203.0.113.10",
+        ),
       ).rejects.toBeInstanceOf(UnauthorizedException);
 
       expect(lastAuditAction()).toBe(AuditAction.LOGIN_FAILED);
+    });
+
+    it("incrementa contadores de falha por IP e por e-mail a cada tentativa errada", async () => {
+      prisma.tenant.findUnique.mockResolvedValue({
+        id: "tenant-1",
+        slug: "acme",
+      });
+      prisma.user.findUnique.mockResolvedValue(baseUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+
+      await expect(
+        service.login(
+          {
+            tenantSlug: "acme",
+            email: "ana@example.com",
+            password: "senha-errada",
+          },
+          "203.0.113.10",
+        ),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+
+      expect(redis.incr).toHaveBeenCalledWith(
+        "auth:login-fail:ip:203.0.113.10",
+      );
+      expect(redis.incr).toHaveBeenCalledWith(
+        "auth:login-fail:email:acme:ana@example.com",
+      );
+    });
+
+    it("bloqueia com 429 quando o limite de tentativas por e-mail é excedido", async () => {
+      redis.get.mockImplementation((key: string) =>
+        Promise.resolve(key.includes("email") ? "5" : null),
+      );
+
+      await expect(
+        service.login(
+          {
+            tenantSlug: "acme",
+            email: "ana@example.com",
+            password: "qualquer-coisa",
+          },
+          "203.0.113.10",
+        ),
+      ).rejects.toMatchObject({ status: 429 });
+
+      expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
+    });
+
+    it("bloqueia com 429 quando o limite de tentativas por IP é excedido", async () => {
+      redis.get.mockImplementation((key: string) =>
+        Promise.resolve(key.includes("ip") ? "5" : null),
+      );
+
+      await expect(
+        service.login(
+          {
+            tenantSlug: "acme",
+            email: "outra@example.com",
+            password: "qualquer-coisa",
+          },
+          "203.0.113.10",
+        ),
+      ).rejects.toMatchObject({ status: 429 });
+
+      expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
+    });
+
+    it("limpa os contadores de falha após login bem-sucedido", async () => {
+      prisma.tenant.findUnique.mockResolvedValue({
+        id: "tenant-1",
+        slug: "acme",
+      });
+      prisma.user.findUnique.mockResolvedValue(baseUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await service.login(
+        {
+          tenantSlug: "acme",
+          email: "ana@example.com",
+          password: "supersecret",
+        },
+        "203.0.113.10",
+      );
+
+      expect(redis.del).toHaveBeenCalledWith(
+        "auth:login-fail:ip:203.0.113.10",
+        "auth:login-fail:email:acme:ana@example.com",
+      );
     });
 
     it("rejeita quando a conta é apenas OAuth (sem passwordHash)", async () => {
@@ -295,11 +410,14 @@ describe("AuthService", () => {
       });
 
       await expect(
-        service.login({
-          tenantSlug: "acme",
-          email: "ana@example.com",
-          password: "qualquer",
-        }),
+        service.login(
+          {
+            tenantSlug: "acme",
+            email: "ana@example.com",
+            password: "qualquer",
+          },
+          "203.0.113.10",
+        ),
       ).rejects.toBeInstanceOf(UnauthorizedException);
 
       expect(lastAuditAction()).toBe(AuditAction.LOGIN_FAILED);

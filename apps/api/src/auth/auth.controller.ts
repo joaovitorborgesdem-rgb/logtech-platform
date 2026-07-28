@@ -42,8 +42,8 @@ export class AuthController {
 
   @Post("login")
   @HttpCode(HttpStatus.OK)
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  login(@Body() dto: LoginDto, @Req() req: Request) {
+    return this.authService.login(dto, req.ip ?? "unknown");
   }
 
   @Post("refresh")

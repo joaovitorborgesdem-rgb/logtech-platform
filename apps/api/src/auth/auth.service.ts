@@ -1,5 +1,7 @@
 import {
   ConflictException,
+  HttpException,
+  HttpStatus,
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -30,6 +32,8 @@ import { MfaService } from "./mfa.service";
 const BCRYPT_SALT_ROUNDS = 12;
 const MFA_TOKEN_EXPIRES_IN = "5m";
 const OAUTH_EXCHANGE_TTL_SECONDS = 60;
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOGIN_LOCKOUT_SECONDS = 15 * 60;
 
 export interface AuthTokens {
   accessToken: string;
@@ -102,11 +106,28 @@ export class AuthService {
     return this.buildAuthResult(user);
   }
 
-  async login(dto: LoginDto): Promise<LoginOutcome> {
+  async login(dto: LoginDto, ip: string): Promise<LoginOutcome> {
+    const ipKey = this.loginAttemptKey("ip", ip);
+    const emailKey = this.loginAttemptKey(
+      "email",
+      `${dto.tenantSlug}:${dto.email}`,
+    );
+
+    if (
+      (await this.isLoginLocked(ipKey)) ||
+      (await this.isLoginLocked(emailKey))
+    ) {
+      throw new HttpException(
+        "Muitas tentativas de login. Tente novamente em alguns minutos.",
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const tenant = await this.prisma.tenant.findUnique({
       where: { slug: dto.tenantSlug },
     });
     if (!tenant) {
+      await this.registerFailedLoginAttempt(ipKey, emailKey);
       throw new UnauthorizedException("Credenciais inválidas");
     }
 
@@ -114,6 +135,7 @@ export class AuthService {
       where: { tenantId_email: { tenantId: tenant.id, email: dto.email } },
     });
     if (!user) {
+      await this.registerFailedLoginAttempt(ipKey, emailKey);
       await this.prisma.auditLog.create({
         data: { tenantId: tenant.id, action: AuditAction.LOGIN_FAILED },
       });
@@ -121,6 +143,7 @@ export class AuthService {
     }
 
     if (!user.passwordHash) {
+      await this.registerFailedLoginAttempt(ipKey, emailKey);
       await this.recordAudit(user, AuditAction.LOGIN_FAILED);
       throw new UnauthorizedException(
         "Esta conta usa login social (Google ou GitHub)",
@@ -132,9 +155,12 @@ export class AuthService {
       user.passwordHash,
     );
     if (!passwordMatches || user.status !== UserStatus.ACTIVE) {
+      await this.registerFailedLoginAttempt(ipKey, emailKey);
       await this.recordAudit(user, AuditAction.LOGIN_FAILED);
       throw new UnauthorizedException("Credenciais inválidas");
     }
+
+    await this.clearFailedLoginAttempts(ipKey, emailKey);
 
     const outcome = await this.buildLoginOutcome(user);
     if (!("mfaRequired" in outcome)) {
@@ -445,6 +471,30 @@ export class AuthService {
 
   private oauthExchangeKey(code: string): string {
     return `oauth-exchange:${code}`;
+  }
+
+  private loginAttemptKey(kind: "ip" | "email", value: string): string {
+    return `auth:login-fail:${kind}:${value}`;
+  }
+
+  private async isLoginLocked(key: string): Promise<boolean> {
+    const attempts = await this.redis.get(key);
+    return attempts !== null && Number(attempts) >= MAX_LOGIN_ATTEMPTS;
+  }
+
+  private async registerFailedLoginAttempt(...keys: string[]): Promise<void> {
+    await Promise.all(
+      keys.map(async (key) => {
+        const attempts = await this.redis.incr(key);
+        if (attempts === 1) {
+          await this.redis.expire(key, LOGIN_LOCKOUT_SECONDS);
+        }
+      }),
+    );
+  }
+
+  private async clearFailedLoginAttempts(...keys: string[]): Promise<void> {
+    await this.redis.del(...keys);
   }
 
   private async verifyRefreshToken(

@@ -3,13 +3,14 @@ import "reflect-metadata";
 import { ValidationPipe } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
+import { NestExpressApplication } from "@nestjs/platform-express";
 import compression from "compression";
 import helmet from "helmet";
 import { Logger } from "nestjs-pino";
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
     bufferLogs: true,
   });
@@ -17,6 +18,7 @@ async function bootstrap() {
 
   const config = app.get(ConfigService);
 
+  app.set("trust proxy", 1);
   app.use(helmet());
   app.use(compression());
   app.enableCors({
