@@ -20,6 +20,22 @@ RUN pnpm --filter @logisense/api build
 # monorepo pra uma pasta autocontida (node_modules podado, sem symlinks
 # soltos pro resto do repo) — ver ADR-016.
 RUN pnpm --filter @logisense/api deploy --prod /app/out
+# `pnpm deploy` poda node_modules a partir do lockfile e não recria o
+# artefato que `prisma generate` (postinstall) escreveu durante o
+# `pnpm install` da raiz — o `.prisma/client` gerado (engine + código do
+# client) fica de fora da pasta podada. Sem ele, `require('@prisma/client')`
+# quebra em runtime com `Cannot find module '.prisma/client/default'`
+# assim que qualquer módulo toca no Prisma (ver ADR-021). Regenerar dentro
+# de /app/out resolve isso só se schema/config também estiverem dentro de
+# /app/out — passar `--schema`/`--config` apontando pra fora (pro
+# apps/api/ original) faz a resolução de módulo do Node subir a partir de
+# lá e escrever o client de volta no node_modules errado (o da build stage,
+# que nunca é copiado pro runtime). Por isso copiamos schema/config pra
+# dentro de /app/out antes de gerar, garantindo que a resolução de
+# `@prisma/client` fique presa à árvore de node_modules que a imagem final
+# realmente usa.
+RUN cp -r apps/api/prisma /app/out/prisma && cp apps/api/prisma.config.ts /app/out/prisma.config.ts
+RUN cd /app/out && node_modules/.bin/prisma generate
 
 FROM base AS runtime
 ENV NODE_ENV=production
