@@ -1,5 +1,39 @@
 # Deploy (Railway)
 
+## Status atual (2026-07-28)
+
+### ✅ Ambos os ambientes saudáveis, gate de produção corrigido
+
+- Corrigido `apps/api/Dockerfile` (commit `8a8ebe0`): `pnpm deploy --prod`
+  podava o `.prisma/client` gerado no `pnpm install` da raiz; o build agora
+  copia `prisma/`+`prisma.config.ts` pra dentro de `/app/out` e roda
+  `prisma generate` lá, preso à árvore de `node_modules` que o runtime
+  realmente usa. Sem isso, `api` quebrava no boot em produção **e** staging
+  com `Cannot find module '.prisma/client/default'`.
+- Corrigido `apps/api/src/app.module.ts` (commit `7089d99`): a conexão
+  Redis do `BullModule.forRootAsync` não passava `REDIS_PASSWORD` (só
+  `RedisService` passava) — quebrava com `NOAUTH Authentication required`
+  assim que o Redis do ambiente exige senha (todo plugin Redis do Railway
+  exige).
+- Plugin Redis provisionado em `staging` (faltava — só `production` tinha).
+  Nome do serviço saiu com sufixo aleatório (`Redis-KPAS`, não `Redis`
+  como em produção), então as env vars do `api` em staging referenciam
+  `${{Redis-KPAS.REDISHOST}}` / `${{Redis-KPAS.REDISPORT}}` /
+  `${{Redis-KPAS.REDISPASSWORD}}` — **não** copiar o padrão `${{Redis.*}}`
+  de produção sem checar o nome real do plugin nesse ambiente antes.
+- **Confirmado o risco já documentado abaixo**: produção fez auto-deploy
+  do commit `7089d99` via conexão nativa do Railway ao repo GitHub, direto
+  no push — sem passar pelo gate de aprovação manual do GitHub Environment
+  (o job `deploy-production` correspondente ficou parado em `waiting`
+  mesmo com o deploy já no ar). Corrigido: `api` e `web` de **produção**
+  foram desconectados do source GitHub (`railway service source
+  disconnect`), deixando o `railway up` do CI como único caminho de deploy
+  pra produção. `staging` continua conectado ao GitHub (não tem gate, não
+  há problema em deployar automaticamente lá).
+- `GET /health` verde nos dois ambientes: `api-staging-af8b.up.railway.app`
+  e `api-production-4091.up.railway.app`, com `database`, `redis` e as
+  duas filas BullMQ (`freight-quote-queue`, `insights-queue`) todos `up`.
+
 ## Status atual (2026-07-26)
 
 ### ✅ Validado — pipeline completo funcionando fim a fim
