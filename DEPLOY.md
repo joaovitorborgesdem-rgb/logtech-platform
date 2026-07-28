@@ -1,5 +1,53 @@
 # Deploy (Railway)
 
+## Atualização (2026-07-28, fechamento) — rate limiting no login + furo no gate de produção
+
+### ✅ Proteção contra brute-force no login, validada ao vivo em staging e produção
+
+- Implementado em `AuthService.login()` (commit `e73a329`): contadores no
+  Redis por IP (`auth:login-fail:ip:<ip>`) e por tenant+e-mail
+  (`auth:login-fail:email:<tenantSlug>:<email>`), 5 tentativas falhas
+  permitidas, bloqueio `429` por 15 minutos (`LOGIN_LOCKOUT_SECONDS = 900`)
+  em qualquer uma das duas dimensões — checado antes de qualquer query no
+  banco. Contadores são limpos no login bem-sucedido.
+- `main.ts` agora chama `app.set("trust proxy", 1)` (via
+  `NestFactory.create<NestExpressApplication>`) — sem isso `req.ip` sempre
+  resolveria pro IP do proxy do Railway, não do cliente real, inutilizando
+  o rate limit por IP em staging/produção.
+- Validado ao vivo nos dois ambientes com tenant descartável (criado e
+  removido depois): 5 tentativas erradas retornam `401`, a 6ª em diante
+  retorna `429` — inclusive a senha *correta* é rejeitada enquanto
+  bloqueado (sem brecha pra driblar o limite). Não testado por brute-force
+  contra a conta real de produção, pra não arriscar bloquear a conta usada
+  na demonstração — a cobertura em produção foi confirmada pelo mesmo
+  build já validado em staging, mais um smoke test completo do fluxo de
+  login (registro → login → `/auth/me` → refresh) com conta descartável.
+- Fora de escopo deliberadamente: `/auth/mfa/verify` e `/auth/register`
+  ainda não têm rate limit.
+
+### ⚠️ Gate de aprovação manual da produção tinha um furo: `can_admins_bypass`
+
+- O Environment `production` do GitHub sempre teve `required_reviewers`
+  configurado, mas também tinha `can_admins_bypass: true` — como o dono do
+  repo é ao mesmo tempo admin e o reviewer configurado, todo push feito por
+  ele pulava a aprovação automaticamente. Ficou evidente quando o push do
+  commit `e73a329` disparou `deploy-production` e foi direto pro ar em
+  produção sem pausar, mesmo com o gate "configurado" (o comentário em
+  `ci.yml` que descreve o gate estava desatualizado com a realidade).
+- Corrigido: `can_admins_bypass` setado pra `false` via `gh api -X PUT
+  repos/.../environments/production` — precisa mandar o payload completo
+  (`reviewers`, `prevent_self_review`, `deployment_branch_policy`) numa
+  única PUT, já que a API substitui a config inteira do Environment; e
+  `deployment_branch_policy: null` tem que ser `null` de JSON de verdade
+  (via `--input`), não a string `"null"`. A partir de agora
+  `deploy-production` pausa mesmo pra aprovação manual em todo push na
+  `main`, inclusive os do dono do repo.
+- Havia duas execuções de `deploy-production` presas em `waiting` há dias,
+  de commits bem antigos (`1a1c9d5`, 11 commits atrás; `a0b4c62`, 20
+  commits atrás). Canceladas em vez de aprovadas — aprovar teria feito
+  deploy de código velho por cima do que já está no ar, revertendo várias
+  correções já em produção.
+
 ## Status atual (2026-07-28)
 
 ### ✅ Ambos os ambientes saudáveis, gate de produção corrigido
