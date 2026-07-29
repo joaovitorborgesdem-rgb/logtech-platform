@@ -2,7 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { ApiError, apiFetch } from "@/lib/api-client";
+import {
+  ApiError,
+  apiFetch,
+  SESSION_EXPIRED_MESSAGE,
+} from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { CepSearch } from "@/components/cep-search";
 import { createRealtimeSocket } from "@/lib/realtime-socket";
@@ -29,6 +33,11 @@ interface FreightQuote {
   options: FreightQuoteOption[];
 }
 
+const HTTP_UNAUTHORIZED = 401;
+const QUOTE_STATUS_TIMEOUT_MS = 20_000;
+const QUOTE_STATUS_TIMEOUT_MESSAGE =
+  "Não foi possível confirmar o status da cotação. Tente novamente.";
+
 export default function NewFreightQuotePage() {
   const { user, accessToken, initialized } = useAuth();
   const router = useRouter();
@@ -43,6 +52,7 @@ export default function NewFreightQuotePage() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdQuote, setCreatedQuote] = useState<FreightQuote | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialized && !user) {
@@ -57,6 +67,17 @@ export default function NewFreightQuotePage() {
 
     const quoteId = createdQuote.id;
     let cancelled = false;
+    let settled = false;
+
+    function markSettled() {
+      settled = true;
+    }
+
+    function handleUnrecoverable(message: string) {
+      if (cancelled) return;
+      markSettled();
+      setStatusError(message);
+    }
 
     // The calculation worker can finish (and emit "freight-quote.updated")
     // before the socket below finishes its handshake + tenant-room join —
@@ -67,19 +88,44 @@ export default function NewFreightQuotePage() {
       token: accessToken,
     })
       .then((quote) => {
-        if (!cancelled) setCreatedQuote(quote);
+        if (!cancelled) {
+          markSettled();
+          setCreatedQuote(quote);
+        }
       })
-      .catch(() => undefined);
+      .catch((err) => {
+        // An auth failure here is unrecoverable for this screen even if the
+        // WebSocket below still connects fine with the same stale token —
+        // surface it instead of relying solely on the timeout fallback.
+        if (err instanceof ApiError && err.status === HTTP_UNAUTHORIZED) {
+          handleUnrecoverable(err.message);
+        }
+      });
 
     const socket = createRealtimeSocket(accessToken);
     socket.on("freight-quote.updated", (updated: FreightQuote) => {
       if (updated.id === quoteId) {
+        markSettled();
         setCreatedQuote(updated);
       }
     });
+    socket.on("error", (payload: { message?: string }) => {
+      handleUnrecoverable(payload?.message ?? QUOTE_STATUS_TIMEOUT_MESSAGE);
+    });
+
+    // Last-resort safety net: if neither the reconciliation fetch nor the
+    // socket ever resolves the status (e.g. both silently fail the same way
+    // for a reason we didn't anticipate), don't leave the screen spinning
+    // forever — surface something actionable after a bounded wait.
+    const timeoutId = setTimeout(() => {
+      if (!cancelled && !settled) {
+        setStatusError(QUOTE_STATUS_TIMEOUT_MESSAGE);
+      }
+    }, QUOTE_STATUS_TIMEOUT_MS);
 
     return () => {
       cancelled = true;
+      clearTimeout(timeoutId);
       socket.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -88,6 +134,7 @@ export default function NewFreightQuotePage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setStatusError(null);
     setIsSubmitting(true);
 
     try {
@@ -128,10 +175,14 @@ export default function NewFreightQuotePage() {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <section>
-          <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          <label
+            htmlFor="originZipCode"
+            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          >
             CEP de origem
           </label>
           <input
+            id="originZipCode"
             type="text"
             required
             placeholder="00000-000"
@@ -143,10 +194,14 @@ export default function NewFreightQuotePage() {
         </section>
 
         <section>
-          <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          <label
+            htmlFor="destinationZipCode"
+            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          >
             CEP de destino
           </label>
           <input
+            id="destinationZipCode"
             type="text"
             required
             placeholder="00000-000"
@@ -159,10 +214,14 @@ export default function NewFreightQuotePage() {
 
         <section className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            <label
+              htmlFor="weightTons"
+              className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            >
               Peso (toneladas)
             </label>
             <input
+              id="weightTons"
               type="number"
               step="any"
               min="0"
@@ -173,10 +232,14 @@ export default function NewFreightQuotePage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            <label
+              htmlFor="lengthM"
+              className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            >
               Comprimento (m)
             </label>
             <input
+              id="lengthM"
               type="number"
               step="any"
               min="0"
@@ -187,10 +250,14 @@ export default function NewFreightQuotePage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            <label
+              htmlFor="widthM"
+              className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            >
               Largura (m)
             </label>
             <input
+              id="widthM"
               type="number"
               step="any"
               min="0"
@@ -201,10 +268,14 @@ export default function NewFreightQuotePage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            <label
+              htmlFor="heightM"
+              className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            >
               Altura (m)
             </label>
             <input
+              id="heightM"
               type="number"
               step="any"
               min="0"
@@ -217,10 +288,14 @@ export default function NewFreightQuotePage() {
         </section>
 
         <section>
-          <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          <label
+            htmlFor="cargoValue"
+            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          >
             Valor da carga (R$)
           </label>
           <input
+            id="cargoValue"
             type="number"
             step="any"
             min="0"
@@ -262,9 +337,21 @@ export default function NewFreightQuotePage() {
           </ul>
 
           {(createdQuote.status === "PENDING" ||
-            createdQuote.status === "PROCESSING") && (
-            <p className="mt-4">Calculando opções de frete em tempo real…</p>
-          )}
+            createdQuote.status === "PROCESSING") &&
+            (statusError ? (
+              <div className="mt-4 text-red-700 dark:text-red-300">
+                <p>{statusError}</p>
+                {statusError === SESSION_EXPIRED_MESSAGE && (
+                  <a href="/login" className="font-medium underline">
+                    Fazer login novamente
+                  </a>
+                )}
+              </div>
+            ) : (
+              <p className="mt-4">
+                Calculando opções de frete em tempo real…
+              </p>
+            ))}
 
           {createdQuote.status === "ERROR" && (
             <p className="mt-4 text-red-700 dark:text-red-300">

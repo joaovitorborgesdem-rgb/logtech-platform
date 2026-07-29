@@ -5,14 +5,46 @@ import { FormEvent, useState } from "react";
 import { ApiError } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 
-export default function LoginPage() {
-  const { login } = useAuth();
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// Lighter than slugify(): only drops disallowed characters, without
+// collapsing repeats or trimming a trailing hyphen — slugify() would strip
+// a hyphen the moment it's typed (last character), making it impossible to
+// type one in the middle of a slug via normal sequential keystrokes.
+function sanitizeSlugInput(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9-]/g, "");
+}
+
+export default function RegisterPage() {
+  const { register } = useAuth();
   const router = useRouter();
+  const [tenantName, setTenantName] = useState("");
   const [tenantSlug, setTenantSlug] = useState("");
+  const [slugTouched, setSlugTouched] = useState(false);
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  function handleTenantNameChange(value: string) {
+    setTenantName(value);
+    if (!slugTouched) {
+      setTenantSlug(slugify(value));
+    }
+  }
+
+  function handleTenantSlugChange(value: string) {
+    setSlugTouched(true);
+    setTenantSlug(sanitizeSlugInput(value));
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -20,24 +52,16 @@ export default function LoginPage() {
     setIsSubmitting(true);
 
     try {
-      const result = await login({ tenantSlug, email, password });
-      if ("mfaRequired" in result) {
-        router.push(
-          `/mfa/verify?mfaToken=${encodeURIComponent(result.mfaToken)}`,
-        );
-        return;
-      }
+      await register({ tenantName, tenantSlug, name, email, password });
       router.push("/freight-quotes/new");
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : "Não foi possível entrar",
+        err instanceof ApiError ? err.message : "Não foi possível criar a conta",
       );
     } finally {
       setIsSubmitting(false);
     }
   }
-
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
 
   return (
     <div className="flex flex-1 items-center justify-center bg-zinc-50 px-4 dark:bg-black">
@@ -46,8 +70,26 @@ export default function LoginPage() {
         className="w-full max-w-sm rounded-lg border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
       >
         <h1 className="mb-6 text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-          Entrar no LogiSense
+          Criar conta no LogiSense
         </h1>
+
+        <label
+          htmlFor="tenantName"
+          className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+        >
+          Nome da empresa
+        </label>
+        <input
+          id="tenantName"
+          type="text"
+          required
+          minLength={2}
+          maxLength={120}
+          value={tenantName}
+          onChange={(event) => handleTenantNameChange(event.target.value)}
+          placeholder="Acme Transportes"
+          className="mb-4 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+        />
 
         <label
           htmlFor="tenantSlug"
@@ -59,9 +101,31 @@ export default function LoginPage() {
           id="tenantSlug"
           type="text"
           required
+          pattern="[a-z0-9]+(-[a-z0-9]+)*"
+          title="Apenas letras minúsculas, números e hífens"
           value={tenantSlug}
-          onChange={(event) => setTenantSlug(event.target.value)}
+          onChange={(event) => handleTenantSlugChange(event.target.value)}
           placeholder="acme"
+          className="mb-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+        />
+        <p className="mb-4 text-xs text-zinc-500 dark:text-zinc-400">
+          Usado para entrar depois — só letras minúsculas, números e hífens.
+        </p>
+
+        <label
+          htmlFor="name"
+          className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+        >
+          Seu nome
+        </label>
+        <input
+          id="name"
+          type="text"
+          required
+          minLength={2}
+          maxLength={120}
+          value={name}
+          onChange={(event) => setName(event.target.value)}
           className="mb-4 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         />
 
@@ -90,6 +154,8 @@ export default function LoginPage() {
           id="password"
           type="password"
           required
+          minLength={8}
+          maxLength={72}
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           className="mb-6 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
@@ -106,37 +172,18 @@ export default function LoginPage() {
           disabled={isSubmitting}
           className="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
         >
-          {isSubmitting ? "Entrando..." : "Entrar"}
+          {isSubmitting ? "Criando conta..." : "Criar conta"}
         </button>
 
         <p className="mt-4 text-center text-sm text-zinc-600 dark:text-zinc-400">
-          Ainda não tem uma conta?{" "}
+          Já tem uma conta?{" "}
           <a
-            href="/register"
+            href="/login"
             className="font-medium text-blue-600 underline dark:text-blue-400"
           >
-            Criar conta
+            Entrar
           </a>
         </p>
-
-        <div className="my-4 flex items-center gap-3">
-          <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">ou</span>
-          <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
-        </div>
-
-        <a
-          href={`${apiUrl}/auth/google`}
-          className="mb-2 flex w-full items-center justify-center rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-50 dark:hover:bg-zinc-900"
-        >
-          Continuar com Google
-        </a>
-        <a
-          href={`${apiUrl}/auth/github`}
-          className="flex w-full items-center justify-center rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-50 dark:hover:bg-zinc-900"
-        >
-          Continuar com GitHub
-        </a>
       </form>
     </div>
   );

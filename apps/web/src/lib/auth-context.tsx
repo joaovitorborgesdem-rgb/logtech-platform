@@ -50,6 +50,13 @@ interface AuthContextValue {
     email: string;
     password: string;
   }) => Promise<LoginOutcome>;
+  register: (params: {
+    tenantName: string;
+    tenantSlug: string;
+    name: string;
+    email: string;
+    password: string;
+  }) => Promise<AuthResult>;
   verifyMfa: (params: { mfaToken: string; code: string }) => Promise<void>;
   exchangeOAuthCode: (code: string) => Promise<LoginOutcome>;
   setupMfa: () => Promise<MfaSetupResult>;
@@ -98,6 +105,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: params,
       });
       return applyLoginOutcome(result);
+    },
+    [],
+  );
+
+  const register = useCallback(
+    async (params: {
+      tenantName: string;
+      tenantSlug: string;
+      name: string;
+      email: string;
+      password: string;
+    }) => {
+      const result = await apiFetch<AuthResult>("/auth/register", {
+        method: "POST",
+        body: params,
+      });
+      setSession({
+        user: result.user,
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+      });
+      return result;
     },
     [],
   );
@@ -181,6 +210,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       accessToken: session?.accessToken ?? null,
       initialized,
       login,
+      register,
       verifyMfa,
       exchangeOAuthCode,
       setupMfa,
@@ -192,6 +222,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       session,
       initialized,
       login,
+      register,
       verifyMfa,
       exchangeOAuthCode,
       setupMfa,
