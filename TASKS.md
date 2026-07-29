@@ -17,7 +17,9 @@ Legenda: `[x]` feito · `[ ]` pendente
 - [x] Estratégia de auth (JWT access + refresh token)
 - [x] Endpoints: registro, login, refresh, logout
 - [x] Guards de rota (`JwtAuthGuard`, `RolesGuard`)
-- [ ] Recuperação/reset de senha (envio de e-mail)
+- [ ] Recuperação/reset de senha (envio de e-mail) — **ainda pendente**,
+      confirmado em 2026-07-29 durante checklist de verificação pós-deploy;
+      sem endpoint nem envio de e-mail implementados
 - [x] Hash de senha (bcrypt) e políticas de força (mínimo 8 caracteres)
 - [x] Login social (Google/GitHub via Passport, `passport-google-oauth20`/
       `passport-github2`) com criação automática de tenant + usuário `OWNER`
@@ -82,6 +84,14 @@ Legenda: `[x]` feito · `[ ]` pendente
 - [x] Webhooks de entrada (recebimento de eventos externos) — `POST /webhooks/carriers/:tenantSlug`, autenticado por assinatura HMAC (`Tenant.webhookSecret`), ver ADR-010
 
 ## 8. Upload de arquivos
+
+**⚠️ Confirmado QUEBRADO em staging e produção (2026-07-29)** — ver
+DEPLOY.md para detalhes. Código completo e correto (itens abaixo
+permanecem `[x]`), mas nenhum dos dois ambientes tem storage S3-compatible
+real configurado; todo upload falha com `500`. Decisão do usuário
+(2026-07-29): usar um MinIO hospedado no Railway — provisionamento ainda
+não feito, retomar nesse ponto.
+
 - [x] Estratégia de storage (S3-compatible / local em dev) — MinIO via
       docker-compose em dev, `StorageService` sobre `@aws-sdk/client-s3`
       (troca para AWS S3 real só por configuração, ver ADR-011)

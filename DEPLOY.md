@@ -1,5 +1,64 @@
 # Deploy (Railway)
 
+## ⚠️ Pendências abertas (2026-07-29, pausado para retomar depois)
+
+Duas lacunas confirmadas durante um checklist de verificação pós-deploy
+(rate limiting, telas, MFA, OAuth, CEP, insights, leads/clients — todas
+essas OK). Nenhuma das duas é regressão de hoje; ambas já existiam antes
+desta sessão, só não tinham sido detectadas.
+
+### 1. Upload de anexos QUEBRADO em staging e produção
+
+`POST /attachments` retorna `500` nos dois ambientes — confirmado com uma
+tentativa de upload real (tenant descartável + cliente descartável + PDF
+pequeno), falha rápida (~700-800ms, consistente com conexão recusada, não
+timeout). Nenhum dado órfão ficou para trás: o upload pro S3 acontece
+antes de qualquer escrita no banco (`attachments.service.ts`), então a
+falha não deixa linha de `Attachment` nem cliente/tenant reais afetados
+(os descartáveis usados no teste foram removidos).
+
+**Causa raiz**: nenhum dos dois ambientes tem `S3_*` configurado —
+`railway variables --service api --environment production|staging`
+não retorna nada pra `S3_*`. Os dois caem no default de dev
+(`S3_ENDPOINT=http://localhost:9000`, credenciais do MinIO local), que
+não existe dentro do container Railway. Já estava sinalizado como
+pendência no checklist mais abaixo ("Decidir e apontar `S3_*` pro storage
+real de produção") — nunca foi feito, nem pra produção nem pra staging.
+Ver também TASKS.md, Fase 8.
+
+**Decisão do usuário (2026-07-29): usar um MinIO hospedado no Railway**
+(via `railway add --image minio/minio:latest`, mesmo padrão já usado pra
+`MySQL`/`Redis` nesse projeto — serviço a partir de imagem Docker, não o
+marketplace de plugins gerenciados). **Ainda não provisionado** — sessão
+pausada nesse ponto a pedido do usuário, antes de eu confirmar como
+Railway lida com o comando de start do container MinIO (a imagem oficial
+exige argumentos explícitos tipo `server /data --console-address ":9001"`,
+e não achei ainda se `railway add --image` permite setar isso
+direto ou se precisa de outro passo) e antes de criar o bucket
+`logisense-uploads` (o app não cria automaticamente — `storage.service.ts`
+assume que já existe, alguém criou manualmente em dev via console/`mc`).
+
+**Retomar por aqui:**
+1. Decidir/confirmar o comando de start do container MinIO no Railway.
+2. Provisionar MinIO **separado por ambiente** (staging e produção, cada
+   um com seu próprio volume — mesmo padrão de "nunca compartilhar banco
+   entre ambientes" já usado pra MySQL/Redis).
+3. Criar o bucket `logisense-uploads` em cada instância (não é automático).
+4. Setar `S3_ENDPOINT`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`/
+   `S3_BUCKET`/`S3_FORCE_PATH_STYLE` no serviço `api` de cada ambiente
+   (essas são lidas em runtime via `ConfigService`, não build-time como o
+   `NEXT_PUBLIC_*` do `web` — não deveria precisar de rebuild, só redeploy
+   do `api` pra garantir que pegou, mesma cautela já documentada abaixo
+   sobre `railway variables` não recarregar sozinho).
+5. Testar upload de verdade (mesmo tenant/cliente descartável, arquivo
+   pequeno) nos dois ambientes antes de considerar resolvido.
+
+### 2. Recuperação de senha por e-mail — ainda não implementada
+
+Sem endpoint, sem envio de e-mail. Já rastreado como pendência aberta na
+Fase 1 do TASKS.md (nunca chegou a ser implementado, não é uma regressão).
+Não investigado a fundo nesta sessão além de confirmar que segue faltando.
+
 ## Atualização (2026-07-29) — staging `web` nunca teve `NEXT_PUBLIC_API_URL` configurado
 
 Achado ao verificar o bundle de produção do `web` em staging (comparando
