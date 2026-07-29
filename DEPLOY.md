@@ -1,5 +1,33 @@
 # Deploy (Railway)
 
+## Atualização (2026-07-29) — staging `web` nunca teve `NEXT_PUBLIC_API_URL` configurado
+
+Achado ao verificar o bundle de produção do `web` em staging (comparando
+com o de produção, que já tinha o fix a4d46ee corretamente embutido):
+`https://web-staging-32c4.up.railway.app` estava servindo JS com a
+constante de API base igual a `http://localhost:3000` — o fallback do
+código (`process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000"`),
+não o valor real. `railway variables --service web --environment staging`
+confirmou: `NEXT_PUBLIC_API_URL` e `NEXT_PUBLIC_SITE_URL` **nunca
+existiram** nesse serviço/ambiente (produção tinha os dois desde o
+deploy inicial, ver checklist mais abaixo). Ou seja, **nenhuma sessão de
+navegador real contra o `web` de staging jamais conseguiu falar com o
+`api` de staging** — toda chamada `fetch`/`XHR` ia para `localhost:3000`
+do próprio cliente, que não existe fora de um ambiente de dev local.
+Passou despercebido porque toda verificação anterior em staging neste
+histórico usava `curl` direto pro `api`, nunca pelo `web` de fato.
+
+Corrigido: `NEXT_PUBLIC_API_URL=https://api-staging-af8b.up.railway.app`
+e `NEXT_PUBLIC_SITE_URL=https://web-staging-32c4.up.railway.app`
+setados via `railway variables --set ... --service web --environment
+staging --skip-deploys`, seguido de `railway service redeploy --service
+web --environment staging --yes` — **obrigatório**, já que essas
+variáveis são embutidas em build-time (`ARG` do Dockerfile), não lidas
+em runtime; só setar a variável não muda o bundle já buildado (mesma
+pegadinha já documentada no checklist "Env vars do serviço `web`" mais
+abaixo, dessa vez pego na prática). Verificado após o redeploy: bundle
+novo contém `api-staging-af8b.up.railway.app`, não mais `localhost`.
+
 ## Atualização (2026-07-28, fechamento) — rate limiting no login + furo no gate de produção
 
 ### ✅ Proteção contra brute-force no login, validada ao vivo em staging e produção
