@@ -110,7 +110,16 @@ novo contém `api-staging-af8b.up.railway.app`, não mais `localhost`.
   e `api-production-4091.up.railway.app`, com `database`, `redis` e as
   duas filas BullMQ (`freight-quote-queue`, `insights-queue`) todos `up`.
 
-## Limitação conhecida: busca de CEP por endereço pode falhar em produção
+## Limitação conhecida (RESOLVIDA em 2026-07-29): busca de CEP por endereço podia falhar em produção
+
+**Atualização 2026-07-29**: confirmado normalizado — `GET
+/integrations/viacep/search` respondeu `200` de forma consistente em
+produção em 5 verificações seguidas (com resultados reais do ViaCEP),
+igual a `staging`. Bate com a expectativa registrada abaixo de que
+blocks de IP compartilhado costumam ser temporários; não foi feita
+nenhuma mudança de código ou infraestrutura para isso — só normalizou
+sozinho. Descrição original do problema mantida abaixo para referência,
+caso volte a acontecer.
 
 `GET /integrations/viacep/search` (busca por UF/cidade/logradouro, usada
 na tela de simulação de frete) pode retornar `502` intermitentemente **só
